@@ -1,0 +1,37 @@
+{
+  "name": "voyager-ai-backend",
+  "version": "1.0.0",
+  "description": "Voyager AI Backend - Python API for travel itinerary generation",
+  "main": "app/main.py",
+  "scripts": {
+    "dev": "python -m flask run --host=0.0.0.0 --port=5000 --debug",
+    "start": "python -m flask run --host=0.0.0.0 --port=5000",
+    "build": "echo 'Python backend build complete'",
+    "install": "pip install -r requirements.txt",
+    "install:venv": "python -m venv venv && .\\venv\\Scripts\\activate && pip install -r requirements.txt",
+    "activate": ".\\venv\\Scripts\\activate",
+    "lint": "python -m flake8 app/ || echo 'Flake8 not configured'",
+    "format": "python -m black app/ || echo 'Black not configured'",
+    "test": "python -m pytest tests/ || echo 'Tests not configured'",
+    "migrate": "python -m flask db upgrade || echo 'No migrations configured'",
+    "seed": "python app/seed.py || echo 'No seed script found'"
+  },
+  "keywords": [
+    "python",
+    "flask",
+    "fastapi",
+    "api",
+    "travel",
+    "ai",
+    "backend"
+  ],
+  "author": "Voyager AI Team",
+  "license": "MIT",
+  "engines": {
+    "python": ">=3.8.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voyager-ai/voyager-ai.git"
+  }
+}

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voyager AI - Mission Control Loading</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #111827;
+            background-image: 
+                radial-gradient(circle at 25% 25%, rgba(34, 211, 238, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+                linear-gradient(135deg, transparent 0%, rgba(34, 211, 238, 0.02) 100%);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            color: #e5e7eb;
+        }
+
+        /* Animated Grid Background */
+        .grid-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(34, 211, 238, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(34, 211, 238, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: gridMove 20s linear infinite;
+            z-index: 1;
+        }
+
+        @keyframes gridMove {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
+        }
+
+        /* Floating Data Points */
+        .data-points {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+
+        .data-point {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #22d3ee;
+            border-radius: 50%;
+            opacity: 0;
+            animation: dataFloat 4s ease-in-out infinite;
+        }
+
+        .data-point:nth-child(1) { top: 20%; left: 15%; animation-delay: 0s; }
+        .data-point:nth-child(2) { top: 60%; left: 85%; animation-delay: 1s; }
+        .data-point:nth-child(3) { top: 80%; left: 25%; animation-delay: 2s; }
+        .data-point:nth-child(4) { top: 30%; left: 70%; animation-delay: 3s; }
+        .data-point:nth-child(5) { top: 10%; left: 60%; animation-delay: 1.5s; }
+
+        @keyframes dataFloat {
+            0%, 100% { opacity: 0; transform: translateY(0px) scale(1); }
+            50% { opacity: 1; transform: translateY(-20px) scale(1.2); }
+        }
+
+        /* Main Loading Container - Glassmorphism */
+        .mission-control {
+            position: relative;
+            background: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            border-radius: 24px;
+            padding: 60px 80px;
+            min-width: 600px;
+            max-width: 800px;
+            text-align: center;
+            z-index: 10;
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.5),
+                0 0 0 1px rgba(34, 211, 238, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Logo/Header */
+        .logo {
+            font-size: 32px;
+            font-weight: 700;
+            color: #e5e7eb;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+
+        .logo .ai {
+            color: #22d3ee;
+            text-shadow: 0 0 20px rgba(34, 211, 238, 0.5);
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: #9ca3af;
+            font-weight: 400;
+            letter-spacing: 1px;
+            margin-bottom: 40px;
+            text-transform: uppercase;
+        }
+
+        /* World Map Animation */
+        .world-map-container {
+            position: relative;
+            width: 400px;
+            height: 200px;
+            margin: 0 auto 40px;
+            border-radius: 16px;
+            background: rgba(34, 211, 238, 0.05);
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            overflow: hidden;
+        }
+
+        .world-map {
+            width: 100%;
+            height: 100%;
+            background: 
+                linear-gradient(45deg, transparent 30%, rgba(34, 211, 238, 0.1) 35%, transparent 40%),
+                linear-gradient(135deg, transparent 60%, rgba(139, 92, 246, 0.1) 65%, transparent 70%);
+            position: relative;
+        }
+
+        /* Flight Path Animation */
+        .flight-paths {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .flight-path {
+            position: absolute;
+            height: 2px;
+            background: linear-gradient(90deg, transparent 0%, #22d3ee 50%, transparent 100%);
+            border-radius: 2px;
+            opacity: 0;
+            animation: pathDraw 3s ease-in-out infinite;
+        }
+
+        .path-1 {
+            top: 30%;
+            left: 10%;
+            width: 80%;
+            animation-delay: 0s;
+            transform: rotate(-10deg);
+        }
+
+        .path-2 {
+            top: 60%;
+            left: 5%;
+            width: 70%;
+            animation-delay: 1s;
+            transform: rotate(15deg);
+        }
+
+        .path-3 {
+            top: 80%;
+            left: 20%;
+            width: 60%;
+            animation-delay: 2s;
+            transform: rotate(-5deg);
+        }
+
+        @keyframes pathDraw {
+            0% { opacity: 0; width: 0%; }
+            50% { opacity: 1; }
+            100% { opacity: 0; width: 80%; }
+        }
+
+        /* Location Markers */
+        .location-marker {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #22d3ee;
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.8);
+            animation: markerPulse 2s ease-in-out infinite;
+        }
+
+        .marker-india { top: 50%; left: 70%; }
+        .marker-usa { top: 40%; left: 20%; }
+        .marker-europe { top: 30%; left: 50%; }
+        .marker-japan { top: 45%; left: 85%; }
+
+        @keyframes markerPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.7; }
+        }
+
+        /* Loading Status */
+        .loading-status {
+            margin: 30px 0;
+        }
+
+        .status-text {
+            font-size: 18px;
+            font-weight: 500;
+            color: #e5e7eb;
+            margin-bottom: 20px;
+            letter-spacing: 0.5px;
+            animation: textGlow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes textGlow {
+            from { 
+                text-shadow: 0 0 10px rgba(34, 211, 238, 0.3);
+            }
+            to { 
+                text-shadow: 0 0 20px rgba(34, 211, 238, 0.6), 0 0 30px rgba(34, 211, 238, 0.3);
+            }
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            width: 100%;
+            height: 6px;
+            background: rgba(34, 211, 238, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 20px 0;
+            border: 1px solid rgba(34, 211, 238, 0.2);
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #22d3ee 0%, #8b5cf6 50%, #22d3ee 100%);
+            border-radius: 3px;
+            animation: progressFill 4s ease-in-out infinite;
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.5);
+        }
+
+        @keyframes progressFill {
+            0% { width: 0%; }
+            25% { width: 25%; }
+            50% { width: 50%; }
+            75% { width: 75%; }
+            100% { width: 100%; }
+        }
+
+        /* System Status Indicators */
+        .system-status {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+            padding: 20px 0;
+            border-top: 1px solid rgba(34, 211, 238, 0.2);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22d3ee;
+            animation: statusBlink 2s ease-in-out infinite;
+        }
+
+        .status-dot.secondary {
+            background: #8b5cf6;
+            animation-delay: 0.5s;
+        }
+
+        @keyframes statusBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Floating Elements */
+        .floating-element {
+            position: absolute;
+            color: rgba(34, 211, 238, 0.4);
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            animation: floatUpDown 3s ease-in-out infinite;
+        }
+
+        .float-1 { top: 20%; right: 10%; animation-delay: 0s; }
+        .float-2 { bottom: 30%; left: 5%; animation-delay: 1s; }
+        .float-3 { top: 70%; right: 20%; animation-delay: 2s; }
+
+        @keyframes floatUpDown {
+            0%, 100% { transform: translateY(0px); opacity: 0.4; }
+            50% { transform: translateY(-10px); opacity: 0.8; }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .mission-control {
+                min-width: 350px;
+                padding: 40px 30px;
+            }
+            
+            .world-map-container {
+                width: 300px;
+                height: 150px;
+            }
+            
+            .logo {
+                font-size: 24px;
+            }
+            
+            .system-status {
+                flex-wrap: wrap;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Effects -->
+    <div class="grid-background"></div>
+    
+    <div class="data-points">
+        <div class="data-point"></div>
+        <div class="data-point"></div>
+        <div class="data-point"></div>
+        <div class="data-point"></div>
+        <div class="data-point"></div>
+    </div>
+
+    <!-- Floating Code Elements -->
+    <div class="floating-element float-1">{ lat: 28.7041, lng: 77.1025 }</div>
+    <div class="floating-element float-2">routing.optimize()</div>
+    <div class="floating-element float-3">neural.process()</div>
+
+    <!-- Main Mission Control Interface -->
+    <div class="mission-control">
+        <div class="logo">
+            Voyager <span class="ai">AI</span>
+        </div>
+        <div class="subtitle">Mission Control Interface</div>
+
+        <!-- World Map with Flight Paths -->
+        <div class="world-map-container">
+            <div class="world-map">
+                <!-- Location Markers -->
+                <div class="location-marker marker-india"></div>
+                <div class="location-marker marker-usa"></div>
+                <div class="location-marker marker-europe"></div>
+                <div class="location-marker marker-japan"></div>
+                
+                <!-- Animated Flight Paths -->
+                <div class="flight-paths">
+                    <div class="flight-path path-1"></div>
+                    <div class="flight-path path-2"></div>
+                    <div class="flight-path path-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Status -->
+        <div class="loading-status">
+            <div class="status-text" id="statusText">Analyzing flight paths...</div>
+            
+            <div class="progress-container">
+                <div class="progress-bar"></div>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="system-status">
+            <div class="status-item">
+                <div class="status-dot"></div>
+                <span>Route Engine</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot secondary"></div>
+                <span>AI Processing</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot"></div>
+                <span>Data Analysis</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot secondary"></div>
+                <span>Optimization</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Dynamic loading messages that match the design brief
+            const statusMessages = [
+                "Analyzing flight paths...",
+                "Optimizing routes...",
+                "Discovering local gems...",
+                "Processing travel data...",
+                "Calculating best connections...",
+                "Finalizing itinerary..."
+            ];
+            
+            const statusText = document.getElementById('statusText');
+            let messageIndex = 0;
+            
+            // Cycle through messages
+            setInterval(() => {
+                messageIndex = (messageIndex + 1) % statusMessages.length;
+                statusText.textContent = statusMessages[messageIndex];
+                
+                // Add subtle animation when text changes
+                statusText.style.transform = 'scale(1.05)';
+                setTimeout(() => {
+                    statusText.style.transform = 'scale(1)';
+                }, 200);
+            }, 2500);
+            
+            // Add subtle particle effects
+            function createParticle() {
+                const particle = document.createElement('div');
+                particle.style.cssText = `
+                    position: absolute;
+                    width: 2px;
+                    height: 2px;
+                    background: rgba(34, 211, 238, 0.6);
+                    border-radius: 50%;
+                    pointer-events: none;
+                    animation: particleFloat 3s ease-out forwards;
+                    z-index: 3;
+                `;
+                
+                particle.style.left = Math.random() * window.innerWidth + 'px';
+                particle.style.top = window.innerHeight + 'px';
+                
+                document.body.appendChild(particle);
+                
+                setTimeout(() => particle.remove(), 3000);
+            }
+            
+            // Add particle animation CSS
+            const particleStyle = document.createElement('style');
+            particleStyle.textContent = `
+                @keyframes particleFloat {
+                    0% {
+                        transform: translateY(0px);
+                        opacity: 0;
+                    }
+                    50% {
+                        opacity: 1;
+                    }
+                    100% {
+                        transform: translateY(-100vh);
+                        opacity: 0;
+                    }
+                }
+            `;
+            document.head.appendChild(particleStyle);
+            
+            // Create particles periodically
+            setInterval(createParticle, 800);
+            
+            // Simulate loading completion and transition
+            setTimeout(() => {
+                const missionControl = document.querySelector('.mission-control');
+                missionControl.style.transform = 'scale(0.95)';
+                missionControl.style.opacity = '0.8';
+                
+                // You can add your completion logic here
+                // For example: redirect to main app, show success message, etc.
+            }, 15000);
+        });
+    </script>
+</body>
+</html>
