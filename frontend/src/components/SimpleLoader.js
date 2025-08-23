@@ -52,7 +52,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       
       const centerX = width / 2;
       const centerY = height / 2;
-      const orbitRadius = 40;
+      const orbitRadius = 27;
       
       // Calculate dot position in circular orbit
       const dotX = centerX + Math.cos(angle) * orbitRadius;
@@ -69,7 +69,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       // Draw trail
       trailPoints.forEach((point, index) => {
         const trailAlpha = (index / trailPoints.length) * 0.6;
-        const trailSize = 2 + (index / trailPoints.length) * 1;
+        const trailSize = 2 + (index / trailPoints.length) * 2;
         
         ctx.save();
         ctx.fillStyle = `rgba(255, 255, 255, ${trailAlpha})`;
@@ -140,7 +140,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
         className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white text-center"
         style={{
           marginTop: '80px', // Position below the orbiting star
-          fontSize: '1.2rem',
+          fontSize: '1.8rem',
           fontWeight: '300',
           letterSpacing: '0.1rem',
           fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",

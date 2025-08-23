@@ -7,20 +7,28 @@
 import Head from 'next/head';
 import { useState, useEffect, useRef } from 'react';
 import SpaceBackground from '../components/SpaceBackground';
-import ItineraryWizard from '../components/ItineraryWizard';
 import SimpleLoader from '../components/SimpleLoader';
+import WormholeTransition from '../components/WormholeTransition';
 
 export default function Home() {
-  const [currentView, setCurrentView] = useState('loading'); // 'loading', 'main', 'wizard'
+  const [currentView, setCurrentView] = useState('loading'); // 'loading', 'main', 'wormhole', 'final'
   const [showTitle, setShowTitle] = useState(false);
   const [showButton, setShowButton] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isWormholeActive, setIsWormholeActive] = useState(false);
   const titleRef = useRef(null);
   const buttonRef = useRef(null);
 
   const handleStartJourney = () => {
+    // Instant transition - no delay
     setIsAnimating(true);
-    setCurrentView('wizard');
+    setCurrentView('wormhole');
+    setIsWormholeActive(true);
+  };
+
+  const handleWormholeComplete = () => {
+    setIsWormholeActive(false);
+    setCurrentView('final');
   };
 
   const handleBackToMain = () => {
@@ -50,7 +58,13 @@ export default function Home() {
       </Head>
 
       {/* Space Background - Always visible */}
-      <SpaceBackground isAnimating={isAnimating} />
+      <SpaceBackground isAnimating={false} />
+      
+      {/* Wormhole Transition - Overlay when active */}
+      <WormholeTransition 
+        isActive={isWormholeActive} 
+        onTransitionComplete={handleWormholeComplete}
+      />
       
       {/* Simple Loader overlay */}
       {currentView === 'loading' && (
@@ -66,8 +80,8 @@ export default function Home() {
               <div className="text-center mb-12">
                 <h1 
                   ref={titleRef}
-                  className={`text-white font-light tracking-widest transition-all duration-1000 ${
-                    isAnimating ? 'opacity-0 transform scale-150' : 
+                  className={`text-white font-light tracking-widest transition-all duration-150 ${
+                    isAnimating ? 'opacity-0 transform scale-100' : 
                     showTitle ? 'opacity-100 transform scale-100' : 'opacity-0 transform scale-75'
                   }`}
                   style={{
@@ -85,8 +99,8 @@ export default function Home() {
                   <button
                     ref={buttonRef}
                     onClick={handleStartJourney}
-                    className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-500 hover:bg-blue-300 hover:text-gray-900 hover:shadow-2xl transform hover:scale-105 ${
-                      isAnimating ? 'opacity-0 transform translate-y-10' : 
+                    className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 hover:bg-blue-300 hover:text-gray-900 hover:shadow-2xl transform hover:scale-105 ${
+                      isAnimating ? 'opacity-0 transform translate-y-0' : 
                       showButton ? 'opacity-100 transform translate-y-0 pointer-events-auto' : 'opacity-0 transform translate-y-10 pointer-events-none'
                     }`}
                     style={{
@@ -135,9 +149,28 @@ export default function Home() {
             </div>
           )}
           
-          {/* Wizard View */}
-          {currentView === 'wizard' && (
-            <ItineraryWizard onBack={handleBackToMain} />
+          {/* Final View - Simple message with same backdrop theme */}
+          {currentView === 'final' && (
+            <div className="fixed inset-0 flex flex-col items-center justify-center z-20">
+              <div className="text-center">
+                <h2 className="text-blue-200 text-4xl font-light tracking-widest mb-8"
+                    style={{ 
+                      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+                      textShadow: '0 0 15px rgba(173, 216, 230, 0.7)'
+                    }}>
+                  Chat will appear here
+                </h2>
+                <p className="text-blue-300/70 text-lg mb-8 max-w-md">
+                  Your cosmic journey through the wormhole is complete. The chat interface will be integrated here with the same beautiful space backdrop.
+                </p>
+                <button
+                  onClick={handleBackToMain}
+                  className="px-8 py-4 bg-transparent border-2 border-blue-300 text-blue-200 rounded-lg font-light tracking-wide hover:bg-blue-300 hover:text-gray-900 transition-all duration-300"
+                >
+                  ← Back to Home
+                </button>
+              </div>
+            </div>
           )}
         </>
       )}
