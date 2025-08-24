@@ -14,13 +14,20 @@ const WormholeTransition = ({ isActive, onTransitionComplete }) => {
   // Optimized animation function using useCallback
   const animate = useCallback(() => {
     if (!isActive || !cameraRef.current || !rendererRef.current || !sceneRef.current) {
+      console.log('Animation blocked:', { isActive, hasCamera: !!cameraRef.current, hasRenderer: !!rendererRef.current, hasScene: !!sceneRef.current });
       return;
     }
 
     animationRef.current = requestAnimationFrame(animate);
     
     const delta = clockRef.current.getDelta();
-    const progress = Math.min((Date.now() - clockRef.current.startTime) / 4000, 1); // 4 seconds duration
+    const elapsed = clockRef.current.getElapsedTime() * 1000; // Convert to milliseconds
+    const progress = Math.min(elapsed / 6000, 1); // 6 seconds duration
+    
+    // Debug timing
+    if (Math.floor(elapsed / 1000) !== Math.floor((elapsed - delta * 1000) / 1000)) { // Log every second
+      console.log('WormholeTransition: Elapsed:', elapsed.toFixed(0), 'Progress:', progress.toFixed(2));
+    }
     
     // Update shader time for nebula animation
     if (materialRef.current) {
@@ -37,29 +44,58 @@ const WormholeTransition = ({ isActive, onTransitionComplete }) => {
     // Smooth camera movement with lerp for better performance
     cameraRef.current.position.lerp(point, 0.1);
     cameraRef.current.lookAt(point.clone().add(tangent));
+    
+    // Debug camera position
+    if (progress % 0.2 < 0.01) {
+      console.log('WormholeTransition: Camera position:', cameraRef.current.position.toArray());
+    }
 
     // Render the scene
     rendererRef.current.render(sceneRef.current, cameraRef.current);
+    
+    // Debug rendering info
+    if (progress % 0.2 < 0.01) {
+      console.log('WormholeTransition: Scene children count:', sceneRef.current.children.length);
+      console.log('WormholeTransition: Renderer info:', rendererRef.current.info.render);
+    }
 
     // Check if animation is complete
     if (progress >= 1) {
+      console.log('WormholeTransition: Animation complete, progress:', progress);
       onTransitionComplete();
       return;
+    }
+    
+    // Debug progress
+    if (progress % 0.1 < 0.01) {
+      console.log('WormholeTransition: Progress:', progress.toFixed(2));
     }
   }, [isActive, onTransitionComplete]);
 
   // Initialize Three.js scene
   const initializeScene = useCallback(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      console.log('WormholeTransition: No canvas ref');
+      return;
+    }
+    
+    console.log('WormholeTransition: Initializing scene');
 
     // Scene setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ 
-      canvas: canvasRef.current, 
-      antialias: true,
-      powerPreference: "high-performance"
-    });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ 
+        canvas: canvasRef.current, 
+        antialias: true,
+        powerPreference: "high-performance"
+      });
+      console.log('WormholeTransition: WebGL renderer created successfully');
+    } catch (error) {
+      console.error('WormholeTransition: Failed to create WebGL renderer:', error);
+      return;
+    }
 
     // Optimize renderer
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -248,7 +284,8 @@ const WormholeTransition = ({ isActive, onTransitionComplete }) => {
 
     // Initialize clock
     clockRef.current = new THREE.Clock();
-    clockRef.current.startTime = Date.now();
+    
+    console.log('WormholeTransition: Scene initialized successfully');
 
   }, []);
 
@@ -267,6 +304,7 @@ const WormholeTransition = ({ isActive, onTransitionComplete }) => {
   // Main effect for scene management
   useEffect(() => {
     if (isActive) {
+      console.log('WormholeTransition: Starting animation');
       initializeScene();
       
       // Start animation
@@ -299,13 +337,21 @@ const WormholeTransition = ({ isActive, onTransitionComplete }) => {
   // Don't render anything if not active
   if (!isActive) return null;
 
+  console.log('WormholeTransition: Rendering canvas, isActive:', isActive);
+
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 z-50 pointer-events-none"
+      className="fixed inset-0 z-[9999] pointer-events-none"
       style={{ 
         imageRendering: 'optimizeSpeed',
-        imageRendering: '-webkit-optimize-contrast'
+        imageRendering: '-webkit-optimize-contrast',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        backgroundColor: 'rgba(0, 0, 0, 0.1)' // Temporary background to see if canvas is visible
       }}
     />
   );

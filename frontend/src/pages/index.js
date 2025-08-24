@@ -20,13 +20,20 @@ export default function Home() {
   const buttonRef = useRef(null);
 
   const handleStartJourney = () => {
-    // Instant transition - no delay
+    console.log('handleStartJourney: Starting journey');
+    // Add a small delay to ensure proper state transition
     setIsAnimating(true);
     setCurrentView('wormhole');
-    setIsWormholeActive(true);
+    
+    // Small delay to ensure the wormhole component is properly mounted
+    setTimeout(() => {
+      console.log('handleStartJourney: Setting wormhole active');
+      setIsWormholeActive(true);
+    }, 100);
   };
 
   const handleWormholeComplete = () => {
+    console.log('handleWormholeComplete: Animation completed');
     setIsWormholeActive(false);
     setCurrentView('final');
   };
@@ -65,6 +72,15 @@ export default function Home() {
         isActive={isWormholeActive} 
         onTransitionComplete={handleWormholeComplete}
       />
+      
+      {/* Debug info */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed top-4 left-4 z-[10000] text-white text-sm bg-black/50 p-2 rounded">
+          <div>Current View: {currentView}</div>
+          <div>Wormhole Active: {isWormholeActive ? 'Yes' : 'No'}</div>
+          <div>Animating: {isAnimating ? 'Yes' : 'No'}</div>
+        </div>
+      )}
       
       {/* Simple Loader overlay */}
       {currentView === 'loading' && (
