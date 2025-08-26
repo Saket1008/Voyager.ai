@@ -104,7 +104,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       if (onLoadingComplete) {
         onLoadingComplete();
       }
-    }, 3000);
+    }, 200);
 
     // Start the animation
     drawOrbitingStar();

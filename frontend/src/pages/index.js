@@ -6,37 +6,44 @@
 
 import Head from 'next/head';
 import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import SpaceBackground from '../components/SpaceBackground';
 import SimpleLoader from '../components/SimpleLoader';
-import WormholeTransition from '../components/WormholeTransition';
+import ChatBox from '../components/ChatBox';
 
 export default function Home() {
-  const [currentView, setCurrentView] = useState('loading'); // 'loading', 'main', 'wormhole', 'final'
+  const [currentView, setCurrentView] = useState('loading'); // 'loading', 'main', 'final'
   const [showTitle, setShowTitle] = useState(false);
   const [showButton, setShowButton] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [isWormholeActive, setIsWormholeActive] = useState(false);
+  const [showWormhole, setShowWormhole] = useState(false);
   const titleRef = useRef(null);
   const buttonRef = useRef(null);
 
   const handleStartJourney = () => {
     console.log('handleStartJourney: Starting journey');
-    // Add a small delay to ensure proper state transition
     setIsAnimating(true);
-    setCurrentView('wormhole');
-    
-    // Small delay to ensure the wormhole component is properly mounted
-    setTimeout(() => {
-      console.log('handleStartJourney: Setting wormhole active');
-      setIsWormholeActive(true);
-    }, 100);
+    setShowWormhole(true);
   };
 
   const handleWormholeComplete = () => {
     console.log('handleWormholeComplete: Animation completed');
-    setIsWormholeActive(false);
+    setShowWormhole(false);
     setCurrentView('final');
+    setIsAnimating(false);
   };
+
+  // Listen for wormhole completion message
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data.type === 'WORMHOLE_COMPLETE') {
+        handleWormholeComplete();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const handleBackToMain = () => {
     setCurrentView('main');
@@ -67,18 +74,15 @@ export default function Home() {
       {/* Space Background - Always visible */}
       <SpaceBackground isAnimating={false} />
       
-      {/* Wormhole Transition - Overlay when active */}
-      <WormholeTransition 
-        isActive={isWormholeActive} 
-        onTransitionComplete={handleWormholeComplete}
-      />
-      
-      {/* Debug info */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="fixed top-4 left-4 z-[10000] text-white text-sm bg-black/50 p-2 rounded">
-          <div>Current View: {currentView}</div>
-          <div>Wormhole Active: {isWormholeActive ? 'Yes' : 'No'}</div>
-          <div>Animating: {isAnimating ? 'Yes' : 'No'}</div>
+      {/* Wormhole HTML Overlay */}
+      {showWormhole && (
+        <div className="fixed inset-0 z-[9999] bg-black">
+          <iframe
+            src="/wormhole.html"
+            className="w-full h-full border-0"
+            title="Wormhole Transition"
+            onLoad={() => console.log('Wormhole loaded')}
+          />
         </div>
       )}
       
@@ -165,28 +169,30 @@ export default function Home() {
             </div>
           )}
           
-          {/* Final View - Simple message with same backdrop theme */}
+          {/* Final View - Chat Interface */}
           {currentView === 'final' && (
-            <div className="fixed inset-0 flex flex-col items-center justify-center z-20">
-              <div className="text-center">
-                <h2 className="text-blue-200 text-4xl font-light tracking-widest mb-8"
-                    style={{ 
-                      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-                      textShadow: '0 0 15px rgba(173, 216, 230, 0.7)'
-                    }}>
-                  Chat will appear here
-                </h2>
-                <p className="text-blue-300/70 text-lg mb-8 max-w-md">
-                  Your cosmic journey through the wormhole is complete. The chat interface will be integrated here with the same beautiful space backdrop.
-                </p>
-                <button
-                  onClick={handleBackToMain}
-                  className="px-8 py-4 bg-transparent border-2 border-blue-300 text-blue-200 rounded-lg font-light tracking-wide hover:bg-blue-300 hover:text-gray-900 transition-all duration-300"
-                >
-                  ← Back to Home
-                </button>
-              </div>
-            </div>
+            <motion.div 
+              className="fixed inset-0 z-20"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 1.2, ease: "easeOut" }}
+            >
+              {/* ChatBox Component - Full screen */}
+              <ChatBox />
+              
+              {/* Floating Back to Home Button */}
+              <motion.button
+                onClick={handleBackToMain}
+                className="fixed top-6 right-6 px-6 py-3 bg-[#120F1D]/80 backdrop-blur-md border border-gray-800/30 text-blue-200 rounded-lg font-light tracking-wide hover:bg-[#1A1625]/80 hover:text-white transition-all duration-300 shadow-lg z-30"
+                initial={{ opacity: 0, x: 50 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.8, delay: 1.0 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                
+              </motion.button>
+            </motion.div>
           )}
         </>
       )}
