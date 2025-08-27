@@ -32,6 +32,44 @@ voyager.ai/
 - **Database**: PostgreSQL (future)
 - **Deployment**: Vercel (Frontend), Heroku (Backend)
 
+## Dev Quickstart (Vite client + Express server)
+
+1. Create `server/.env` with:
+```
+PORT=5000
+MONGODB_URI=mongodb://127.0.0.1:27017/voyager
+CLIENT_ORIGIN=http://localhost:5173
+```
+2. Install deps:
+```
+npm install
+npm --prefix client install
+npm --prefix server install
+```
+3. Run both:
+```
+npm run dev
+```
+
+Endpoints:
+- GET http://localhost:5000/health
+- GET/POST http://localhost:5000/api/users
+- POST http://localhost:5000/api/auth/login
+
+### Clerk setup
+
+Client env:
+```
+# client/.env.local
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+```
+
+Server env:
+```
+# server/.env
+CLERK_SECRET_KEY=sk_test_xxx
+```
+
 ## Getting Started
 
 ### Quick Setup (Recommended)

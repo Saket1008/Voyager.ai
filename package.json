@@ -4,36 +4,9 @@
   "description": "Voyager AI - Complete Travel Itinerary Generator with AI-powered planning",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && .\\venv\\Scripts\\Activate.ps1 && uvicorn app.main:app --reload",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "cd frontend && npm run build",
-    "build:backend": "cd backend && python -m pip install -r requirements.txt || py -m pip install -r requirements.txt || echo 'Python not found. Please install Python 3.8+ and add to PATH'",
-    "start": "concurrently \"npm run start:frontend\" \"npm run start:backend\"",
-    "start:frontend": "cd frontend && npm start",
-    "start:backend": "cd backend && .\\venv\\Scripts\\Activate.ps1 && uvicorn app.main:app --host=0.0.0.0 --port=8000",
-    "install:all": "npm install && npm run install:frontend && npm run install:backend",
-    "install:frontend": "cd frontend && npm install",
-    "install:backend": "cd backend && pip install -r requirements.txt",
-    "setup:backend": "powershell -ExecutionPolicy Bypass -File setup-simple.ps1",
-    "setup:backend:manual": "cd backend && python -m venv venv && .\\venv\\Scripts\\Activate.ps1 && pip install -r requirements.txt",
-    "lint": "npm run lint:frontend && npm run lint:backend",
-    "lint:frontend": "cd frontend && npm run lint",
-    "lint:backend": "echo Backend linting not configured",
-    "clean": "npm run clean:frontend && npm run clean:backend",
-    "clean:frontend": "cd frontend && powershell -Command \"Remove-Item -Recurse -Force .next, dist, node_modules/.cache -ErrorAction SilentlyContinue\"",
-    "clean:backend": "cd backend && powershell -Command \"Remove-Item -Recurse -Force __pycache__, .pytest_cache -ErrorAction SilentlyContinue\"",
-    "serve:static": "npx serve frontend/out -p 3000",
-    "preview": "npm run build && npm run serve:static",
-    "type-check": "cd frontend && npx tsc --noEmit",
-    "format": "cd frontend && npx prettier --write .",
-    "test": "npm run test:frontend && npm run test:backend",
-    "test:frontend": "cd frontend && npm test || echo Frontend tests not configured",
-    "test:backend": "cd backend && python -m pytest || echo Backend tests not configured",
-    "open:frontend": "powershell -Command \"Start-Process http://localhost:3000\"",
-    "open:backend": "powershell -Command \"Start-Process http://localhost:8000/docs\"",
-    "open:app": "npm run open:frontend && npm run open:backend"
+    "dev": "concurrently \"npm --prefix frontend run dev\" \"npm --prefix server run dev\"",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix server run start"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
@@ -41,7 +14,7 @@
   },
   "workspaces": [
     "frontend",
-    "backend"
+    "server"
   ],
   "engines": {
     "node": ">=18.0.0",
