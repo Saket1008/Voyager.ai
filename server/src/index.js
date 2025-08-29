@@ -5,6 +5,8 @@ import { Clerk } from '@clerk/clerk-sdk-node';
 import healthRouter from './routes/health.js';
 import usersRouter from './routes/users.js';
 import authRouter from './routes/auth.js';
+import itineraryRouter from './routes/itinerary.js';
+import suggestRoutes from './routes/suggest.js';
 import { connectToDatabase } from './config/db.js';
 
 dotenv.config();
@@ -19,12 +21,14 @@ export const clerk = new Clerk({ secretKey: process.env.CLERK_SECRET_KEY || '' }
 
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173', credentials: true }));
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000', credentials: true }));
 app.use(express.json());
 
 app.use('/', healthRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/itinerary', itineraryRouter);
+app.use('/api/suggest', suggestRoutes);
 
 const port = process.env.PORT || 5000;
 

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
+import ChatWizard from "./ChatWizard";
 import {
   Menu,
   Plus,
@@ -23,6 +25,7 @@ import {
 // • Auto-scroll to latest, slim custom scrollbar, subtle transparency (no space theme)
 
 export default function ChatGPTClone() {
+  const { getToken, isSignedIn } = useAuth();
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -34,7 +37,7 @@ export default function ChatGPTClone() {
       {
         id: cryptoRandomId(),
         role: "assistant",
-        text: "Hello! I'm your Voyager.AI assistant. Ready to help you plan your next cosmic adventure? Where would you like to explore today?",
+        text: "Hello! I'm your Voyager.AI assistant. Ready to help you plan your next cosmic adventure? Where would you like to explore today?\n\nYou can:\n• Type a message to chat\n• Use `/itinerary [prompt]` for quick itinerary generation\n• Use `/wizard` for guided itinerary planning",
       },
     ],
     createdAt: Date.now(),
@@ -42,6 +45,7 @@ export default function ChatGPTClone() {
 
   const [chats, setChats] = useState([makeChat("Welcome")]);
   const [activeId, setActiveId] = useState(chats[0].id);
+  const [wizardActive, setWizardActive] = useState(false);
 
   const activeChat = useMemo(
     () => chats.find((c) => c.id === activeId),
@@ -93,12 +97,19 @@ export default function ChatGPTClone() {
     );
   }
 
-  function send() {
+  async function send() {
     const content = input.trim();
     if (!content || !activeChat) return;
     pushMessage("user", content);
     setInput("");
-    simulateStreamReply(content);
+    if (content.toLowerCase().startsWith("/itinerary ")) {
+      const prompt = content.slice("/itinerary ".length).trim();
+      await handleItinerary(prompt);
+    } else if (content.toLowerCase() === "/wizard") {
+      setWizardActive(true);
+    } else {
+      simulateStreamReply(content);
+    }
   }
 
   function stopGenerating() {
@@ -112,6 +123,81 @@ export default function ChatGPTClone() {
       streamBufferRef.current = "";
     }
     setIsTyping(false);
+  }
+
+  async function handleItinerary(prompt) {
+    stopGenerating();
+    setIsTyping(true);
+    try {
+      if (!isSignedIn) {
+        pushMessage("assistant", "Please sign in to generate an itinerary.");
+        setIsTyping(false);
+        return;
+      }
+      const token = await getToken();
+      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+      const res = await fetch(`${base}/api/itinerary`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || data?.message || `Request failed (${res.status})`);
+      }
+      const data = await res.json();
+      const formatted = formatItineraryText(data);
+      pushMessage("assistant", formatted);
+    } catch (err) {
+      pushMessage("assistant", `Failed to generate itinerary: ${err.message || err}`);
+    } finally {
+      setIsTyping(false);
+    }
+  }
+
+  function formatItineraryText(data) {
+    const flights = Array.isArray(data?.flights) ? data.flights : [];
+    const hotels = Array.isArray(data?.hotels) ? data.hotels : [];
+    const activities = Array.isArray(data?.activities) ? data.activities : [];
+
+    const lines = [];
+    lines.push("Here is your itinerary:\n");
+    lines.push("Flights:");
+    if (flights.length) {
+      flights.forEach((f, i) =>
+        lines.push(`  ${i + 1}. ${f.from || "?"} → ${f.to || "?"} on ${f.date || "?"}`)
+      );
+    } else {
+      lines.push("  (none)");
+    }
+    lines.push("");
+    lines.push("Hotels:");
+    if (hotels.length) {
+      hotels.forEach((h, i) =>
+        lines.push(`  ${i + 1}. ${h.name || "?"}: ${h.checkIn || "?"} → ${h.checkOut || "?"}`)
+      );
+    } else {
+      lines.push("  (none)");
+    }
+    lines.push("");
+    lines.push("Activities:");
+    if (activities.length) {
+      activities.forEach((a, i) =>
+        lines.push(`  Day ${a.day ?? "?"}: ${a.activity || "?"}`)
+      );
+    } else {
+      lines.push("  (none)");
+    }
+    return lines.join("\n");
+  }
+
+  function handleWizardComplete(result) {
+    setWizardActive(false);
+    pushMessage("assistant", result);
   }
 
   function regenerate() {
@@ -156,6 +242,8 @@ export default function ChatGPTClone() {
   // ---- Rendering helpers ---- //
   function MessageBubble({ m }) {
     const isUser = m.role === "user";
+    const isWizardCommand = m.text === "/wizard";
+    
     return (
       <motion.div
         layout
@@ -167,8 +255,12 @@ export default function ChatGPTClone() {
             : "bg-black/60 backdrop-blur-sm border border-white/20 text-white"
         }`}
       >
-        <div className="whitespace-pre-wrap">{m.text}</div>
-        {!isUser && (
+        {isWizardCommand ? (
+          <ChatWizard onComplete={handleWizardComplete} />
+        ) : (
+          <div className="whitespace-pre-wrap">{m.text}</div>
+        )}
+        {!isUser && !isWizardCommand && (
           <div className="absolute -right-10 top-1/2 hidden -translate-y-1/2 items-center gap-2 group-hover:flex">
             <IconButton onClick={() => copy(m.text)} ariaLabel="Copy">
               <Copy size={14} />
@@ -178,7 +270,7 @@ export default function ChatGPTClone() {
             </IconButton>
           </div>
         )}
-        {!isUser && (
+        {!isUser && !isWizardCommand && (
           <div className="mt-2 flex gap-2">
             <SmallButton onClick={regenerate} icon={<RefreshCw size={12} />}>Regenerate</SmallButton>
             {isTyping ? (
@@ -308,7 +400,7 @@ export default function ChatGPTClone() {
             <div className="rounded-xl border border-white/20 bg-black/60 backdrop-blur-sm p-2 shadow-lg">
               <textarea
                 rows={1}
-                placeholder="Ask me about your next cosmic adventure..."
+                placeholder="Ask me about your next cosmic adventure... (Try /wizard for guided planning)"
                 className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-gray-400"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -321,7 +413,7 @@ export default function ChatGPTClone() {
               />
               <div className="flex items-center justify-between px-2">
                 <div className="text-[11px] text-gray-400">
-                  Enter to send • Shift+Enter for newline
+                  Enter to send • Shift+Enter for newline • /wizard for guided planning
                 </div>
                 <button
                   onClick={send}
