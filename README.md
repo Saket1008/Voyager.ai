@@ -60,7 +60,7 @@ Endpoints:
 
 Client env:
 ```
-# client/.env.local
+# frontend/.env.local
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
 ```
 

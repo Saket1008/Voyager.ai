@@ -99,7 +99,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       animationId = requestAnimationFrame(drawOrbitingStar);
     };
     
-    // Auto-complete loading after 3 seconds
+    // Auto-complete loading shortly after start
     const loadingTimer = setTimeout(() => {
       if (onLoadingComplete) {
         onLoadingComplete();
@@ -139,7 +139,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       <div 
         className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white text-center"
         style={{
-          marginTop: '80px', // Position below the orbiting star
+          marginTop: '80px',
           fontSize: '1.8rem',
           fontWeight: '300',
           letterSpacing: '0.1rem',
@@ -154,3 +154,5 @@ const SimpleLoader = ({ onLoadingComplete }) => {
 };
 
 export default SimpleLoader;
+
+

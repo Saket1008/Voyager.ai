@@ -1,18 +1,22 @@
-import express from 'express';
-import clerkRequireAuth from '../middleware/auth.js';
-import { generateSuggestions } from '../services/ai.js';
+import { Router } from 'express';
+import { mustBeAuthed } from '../middleware/auth.js';
+import { generateSuggestion } from '../services/ai.js';
 
-const router = express.Router();
+const router = Router();
+router.use(mustBeAuthed);
 
-router.post('/', clerkRequireAuth, async (req, res) => {
+// POST /api/suggest  { destinations: ["Germany","France"] }
+router.post('/', async (req, res) => {
   try {
-    const { location } = req.body;
-    if (!location) return res.status(400).json({ error: "location required" });
-    const suggestions = await generateSuggestions(location);
-    res.json(suggestions);
+    const { destinations } = req.body || {};
+    if (!Array.isArray(destinations) || destinations.length === 0) {
+      return res.status(400).json({ error: 'destinations array required' });
+    }
+    const data = await generateSuggestion({ destinations });
+    res.json(data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "AI suggestion failed" });
+    console.error('suggest error', err);
+    res.status(500).json({ error: 'Failed to generate suggestion' });
   }
 });
 

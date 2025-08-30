@@ -1,71 +1,48 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const apiKey = process.env.GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Use a current, available model. You can switch to 2.5 Pro/Flash if needed.
+const MODEL = 'gemini-1.5-pro';
 
-if (!apiKey) {
-  // eslint-disable-next-line no-console
-  console.warn('Warning: GEMINI_API_KEY is not set. Itinerary generation will fail.');
+// ------------------ Prompt templates ------------------
+export const PROMPTS = {
+  suggestion: ({ destinations }) => `You are Voyager AI. Based on the selected places, suggest days, best travel months, and a budget band for a decent trip from India.\n\nDestinations: ${destinations.join(', ')}\n\nReturn ONLY valid JSON like:\n{\n  "recommended_days": "8-10",\n  "best_months": "April–June",\n  "estimated_budget": "₹1.8L – ₹2.4L for 2 adults"\n}`,
+
+  itinerary: (payload) => `You are Voyager AI, an expert travel planner.\nThe user is vegetarian (Jain-friendly). Plan respectfully.\nReturn structured JSON exactly as the schema describes. No prose outside JSON.\n\nUser Inputs:\n${JSON.stringify(payload, null, 2)}\n\nSchema:\n{\n  "summary": {\n    "recommended_days": "string",\n    "best_months": "string",\n    "estimated_budget": "string",\n    "key_tips": ["string"]\n  },\n  "flights": [ { "from": "string", "to": "string", "date": "YYYY-MM-DD", "airline": "string" } ],\n  "hotels": [ { "city": "string", "name": "string", "checkIn": "YYYY-MM-DD", "checkOut": "YYYY-MM-DD" } ],\n  "daily_plan": [ { "day": "number", "city": "string", "activities": ["string"] } ],\n  "transport": ["string"],\n  "notes": ["string"]\n}`,
+};
+
+// ------------------ Helpers ------------------
+async function callGemini({ prompt }) {
+  const model = genAI.getGenerativeModel({ model: MODEL });
+  const resp = await model.generateContent(prompt);
+  const text = resp?.response?.text?.();
+  return text || '';
 }
 
-const genAI = new GoogleGenerativeAI(apiKey || '');
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
-
-export async function generateSuggestions(location) {
-  const prompt = `You are a travel planner. Given location(s): ${location}, suggest:
-  - Ideal number of days to visit
-  - Best months to travel
-  - Estimated budget for a decent trip
-  Respond in JSON strictly with keys: days, months, budget.`;
-
-  const result = await model.generateContent({
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ],
-  });
-
-  const text = result?.response?.text?.() || result?.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return JSON.parse(text);
-}
-
-function coerceStructuredItinerary(text) {
+function tryParseJson(text) {
   try {
-    // Try to extract JSON from code fences if present
-    const jsonMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/i);
-    const jsonText = jsonMatch ? jsonMatch[1] : text;
-    const parsed = JSON.parse(jsonText);
-
-    const flights = Array.isArray(parsed.flights) ? parsed.flights : [];
-    const hotels = Array.isArray(parsed.hotels) ? parsed.hotels : [];
-    const activities = Array.isArray(parsed.activities) ? parsed.activities : [];
-
-    return { flights, hotels, activities };
-  } catch (_) {
-    // Best-effort fallback structure
-    return { flights: [], hotels: [], activities: [] };
+    const cleaned = text.trim().replace(/^```(json)?/i, '').replace(/```$/i, '').trim();
+    return JSON.parse(cleaned);
+  } catch {
+    return null;
   }
 }
 
-export async function generateItinerary(data) {
-  const prompt = `Generate a detailed travel itinerary in JSON. User inputs: ${JSON.stringify(
-    data
-  )}. Include daily plan, activities, and recommendations.`;
-
-  const result = await model.generateContent({
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ],
-  });
-
-  const text = result?.response?.text?.() || result?.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return coerceStructuredItinerary(text);
+// ------------------ Public API ------------------
+export async function generateSuggestion({ destinations }) {
+  const prompt = PROMPTS.suggestion({ destinations });
+  const text = await callGemini({ prompt });
+  const json = tryParseJson(text);
+  if (!json) throw new Error('Gemini suggestion parsing failed');
+  return json;
 }
 
-export default { generateItinerary, generateSuggestions };
+export async function generateItinerary(payload) {
+  const prompt = PROMPTS.itinerary(payload);
+  const text = await callGemini({ prompt });
+  const json = tryParseJson(text);
+  if (!json) throw new Error('Gemini itinerary parsing failed');
+  return json;
+}
 
 

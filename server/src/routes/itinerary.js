@@ -1,19 +1,22 @@
-import express from 'express';
-import clerkRequireAuth from '../middleware/auth.js';
+import { Router } from 'express';
+import { mustBeAuthed } from '../middleware/auth.js';
 import { generateItinerary } from '../services/ai.js';
 
-const router = express.Router();
+const router = Router();
+router.use(mustBeAuthed);
 
-// POST /api/itinerary
-router.post('/', clerkRequireAuth, async (req, res) => {
+// POST /api/itinerary  { ...full payload from wizard }
+router.post('/', async (req, res) => {
   try {
-    const data = req.body;
-    const itinerary = await generateItinerary(data);
-    return res.status(200).json(itinerary);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Itinerary generation error:', error);
-    return res.status(500).json({ error: 'Itinerary generation failed' });
+    const payload = req.body || {};
+    if (!payload.destinations || !Array.isArray(payload.destinations)) {
+      return res.status(400).json({ error: 'destinations array required' });
+    }
+    const data = await generateItinerary(payload);
+    res.json(data);
+  } catch (err) {
+    console.error('itinerary error', err);
+    res.status(500).json({ error: 'Failed to generate itinerary' });
   }
 });
 

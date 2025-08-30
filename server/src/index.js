@@ -1,41 +1,28 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { Clerk } from '@clerk/clerk-sdk-node';
-import healthRouter from './routes/health.js';
-import usersRouter from './routes/users.js';
-import authRouter from './routes/auth.js';
+import { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
 import itineraryRouter from './routes/itinerary.js';
-import suggestRoutes from './routes/suggest.js';
-import { connectToDatabase } from './config/db.js';
+import suggestRouter from './routes/suggest.js';
 
 dotenv.config();
 
-if (!process.env.CLERK_SECRET_KEY) {
-  // eslint-disable-next-line no-console
-  console.warn('Warning: CLERK_SECRET_KEY is not set. Protected routes will fail.');
-}
-
-// Initialize Clerk server-side SDK (optional for advanced usage)
-export const clerk = new Clerk({ secretKey: process.env.CLERK_SECRET_KEY || '' });
-
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000', credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(cors({
+  origin: process.env.CLIENT_ORIGIN?.split(',') || '*',
+  credentials: true,
+}));
 
-app.use('/', healthRouter);
-app.use('/api/users', usersRouter);
-app.use('/api/auth', authRouter);
+// Health check
+app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// API routes
 app.use('/api/itinerary', itineraryRouter);
-app.use('/api/suggest', suggestRoutes);
+app.use('/api/suggest', suggestRouter);
 
 const port = process.env.PORT || 5000;
-
-connectToDatabase(process.env.MONGODB_URI).then(() => {
-  app.listen(port, () => {
-    // eslint-disable-next-line no-console
-    console.log(`Server listening on port ${port}`);
-  });
-});
+app.listen(port, () => console.log(`\n🚀 Server listening on http://localhost:${port}\n`));
 

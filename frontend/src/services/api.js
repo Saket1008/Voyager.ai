@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000',
+  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:5000',
   timeout: 120000, // 2 minutes timeout for AI generation
   headers: {
     'Content-Type': 'application/json',
