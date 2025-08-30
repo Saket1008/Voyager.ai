@@ -1,9 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
 import itineraryRouter from './routes/itinerary.js';
 import suggestRouter from './routes/suggest.js';
+import chatRouter from './routes/chat.js';
 
 dotenv.config();
 
@@ -22,6 +22,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 // API routes
 app.use('/api/itinerary', itineraryRouter);
 app.use('/api/suggest', suggestRouter);
+app.use('/api/chat', chatRouter);
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`\n🚀 Server listening on http://localhost:${port}\n`));

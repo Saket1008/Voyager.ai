@@ -45,4 +45,9 @@ export async function generateItinerary(payload) {
   return json;
 }
 
-
+export async function generateChat({ message, context }) {
+  const prompt = `You are Voyager AI, a helpful travel assistant. Answer the user's question succinctly and helpfully.\n\nContext: ${JSON.stringify(context || {}, null, 2)}\n\nUser: ${message}\nAssistant:`;
+  const text = await callGemini({ prompt });
+  const parsed = tryParseJson(text);
+  return parsed ?? { reply: text };
+}

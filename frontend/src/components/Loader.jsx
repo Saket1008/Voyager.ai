@@ -52,7 +52,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       
       const centerX = width / 2;
       const centerY = height / 2;
-      const orbitRadius = 27;
+      const orbitRadius = 40;
       
       // Calculate dot position in circular orbit
       const dotX = centerX + Math.cos(angle) * orbitRadius;
@@ -69,7 +69,7 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       // Draw trail
       trailPoints.forEach((point, index) => {
         const trailAlpha = (index / trailPoints.length) * 0.6;
-        const trailSize = 2 + (index / trailPoints.length) * 2;
+        const trailSize = 2 + (index / trailPoints.length) * 1;
         
         ctx.save();
         ctx.fillStyle = `rgba(255, 255, 255, ${trailAlpha})`;
@@ -99,12 +99,12 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       animationId = requestAnimationFrame(drawOrbitingStar);
     };
     
-    // Auto-complete loading shortly after start
+    // Auto-complete loading after 3 seconds
     const loadingTimer = setTimeout(() => {
       if (onLoadingComplete) {
         onLoadingComplete();
       }
-    }, 200);
+    }, 3000);
 
     // Start the animation
     drawOrbitingStar();
@@ -139,8 +139,8 @@ const SimpleLoader = ({ onLoadingComplete }) => {
       <div 
         className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white text-center"
         style={{
-          marginTop: '80px',
-          fontSize: '1.8rem',
+          marginTop: '80px', // Position below the orbiting star
+          fontSize: '1.2rem',
           fontWeight: '300',
           letterSpacing: '0.1rem',
           fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",

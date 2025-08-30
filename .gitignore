@@ -1,25 +1,5 @@
 # Dependencies
 node_modules/
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
 # Environment variables
 .env
@@ -29,12 +9,14 @@ wheels/
 .env.production.local
 *.env
 
-# Next.js
+# Production builds
+build/
+dist/
 .next/
 out/
 
-# Production build
-/build
+# Vite
+.vite/
 
 # Runtime data
 pids
@@ -92,9 +74,6 @@ typings/
 .cache
 .parcel-cache
 
-# next.js build output
-.next
-
 # nuxt.js build output
 .nuxt
 
@@ -141,4 +120,5 @@ lerna-debug.log*
 *.tmp
 *.temp
 
+# Config directories
 .config/
