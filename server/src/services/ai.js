@@ -6,12 +6,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, '../../.env') });
 
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "AIzaSyAOnstCVyEFyDkHPCowwtfZzx2vSwAeYAU";
 const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
 if (!GEMINI_KEY) {
   console.warn('[VoyagerAI] GEMINI_API_KEY is not set. Falling back to simple, local prompts.');
 }
-const MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
 // ------------------ Chat flow stages ------------------
 export const STAGES = {
