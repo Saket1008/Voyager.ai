@@ -1,18 +1,145 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: resolve(__dirname, '../../.env') });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Use a current, available model. You can switch to 2.5 Pro/Flash if needed.
-const MODEL = 'gemini-1.5-pro';
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
+if (!GEMINI_KEY) {
+  console.warn('[VoyagerAI] GEMINI_API_KEY is not set. Falling back to simple, local prompts.');
+}
+const MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+
+// ------------------ Chat flow stages ------------------
+export const STAGES = {
+  greeting: 'greeting',
+  ask_intent: 'ask_intent', // ask whether user has specific locations or only a region
+  input_locations: 'input_locations',
+  input_region: 'input_region',
+  // Trip core
+  ask_duration: 'ask_duration', // number of days + small flexibility checkbox (±1-2 days)
+  ask_dates: 'ask_dates', // start date picker; auto-calc end date based on days; date flexibility radios
+  // Traveler profile
+  ask_travelers: 'ask_travelers', // solo/couple/family/friends
+  // Vibe & pace
+  ask_pace: 'ask_pace', // relaxed/balanced/action-packed
+  ask_interests: 'ask_interests', // multiselect interests
+  // Practicalities
+  ask_budget: 'ask_budget',
+  // Final polish
+  must_haves: 'must_haves',
+  must_nots: 'must_nots',
+  // Legacy/general
+  ask_experience: 'ask_experience',
+  ask_preferences: 'ask_preferences',
+  generate_suggestions: 'generate_suggestions',
+  iterate: 'iterate',
+};
+
+const NEXT_STAGE = {
+  [STAGES.greeting]: STAGES.ask_intent,
+  [STAGES.ask_intent]: null, // client chooses: input_locations or input_region
+  [STAGES.input_locations]: STAGES.ask_duration,
+  [STAGES.input_region]: STAGES.ask_duration,
+  [STAGES.ask_duration]: STAGES.ask_dates,
+  [STAGES.ask_dates]: STAGES.ask_travelers,
+  [STAGES.ask_travelers]: STAGES.ask_pace,
+  [STAGES.ask_pace]: STAGES.ask_interests,
+  [STAGES.ask_interests]: STAGES.ask_budget,
+  [STAGES.ask_budget]: STAGES.must_haves,
+  [STAGES.must_haves]: STAGES.must_nots,
+  [STAGES.must_nots]: STAGES.generate_suggestions,
+  [STAGES.generate_suggestions]: STAGES.iterate,
+  [STAGES.iterate]: STAGES.iterate,
+};
 
 // ------------------ Prompt templates ------------------
+const EXPECTED_BEHAVIOR = {
+  [STAGES.greeting]: 'Greet the user warmly and immediately ask: “Do you already have a specific list of locations in mind, or do you only know a region?” Keep it short and friendly. Include two options in your wording: “I have specific locations” or “I only know a region.”',
+  [STAGES.ask_intent]: 'Briefly clarify what you need next. Ask the user to pick one: provide specific locations or a general region. Keep it very short and conversational.',
+  [STAGES.input_locations]: 'Acknowledge the provided locations (if any). Ask them to type the names of the locations they want to explore. Keep it short and helpful.',
+  [STAGES.input_region]: 'Acknowledge the provided region (if any). Ask them to type the region or area they’re interested in. Keep it short and encouraging.',
+  [STAGES.ask_duration]: 'Briefly ask for the number of days. Keep it one short sentence. If you know a typical duration for the selected places, mention it succinctly as a suggestion.',
+  [STAGES.ask_dates]: 'Ask them to pick a start date. Mention that the return date will auto-calculate from the chosen number of days. Keep it short. If seasonality is known, mention the best months very briefly.',
+  [STAGES.ask_travelers]: 'Ask who is traveling: Solo, Couple, Family, or Group of Friends. Keep it short.',
+  [STAGES.ask_pace]: 'Ask for preferred pace: Relaxed, Balanced, or Action-Packed. One short sentence.',
+  [STAGES.ask_interests]: 'Ask for main interests with a few examples (History, Food, Adventure, Art, Nightlife, Shopping, Relaxation). Allow choosing multiple. One short sentence.',
+  [STAGES.ask_budget]: 'Ask budget tier simply: Budget-Friendly, Mid-Range, or Luxury.',
+  [STAGES.must_haves]: 'Ask for any must-see places or must-do activities. One short encouragement.',
+  [STAGES.must_nots]: 'Ask for anything to avoid or constraints (e.g., big crowds, seafood, too much walking).',
+  [STAGES.ask_experience]: 'Legacy: short experience question if needed.',
+  [STAGES.ask_preferences]: 'Legacy: optional preferences.',
+  [STAGES.generate_suggestions]: 'Using all given info, generate conversational recommendations or a simple itinerary summary. No rigid tables, keep paragraphs short. End by offering to refine further.',
+  [STAGES.iterate]: 'Acknowledge refinement requests such as “show more options”, “focus on X”, or “adjust for budget/time”. Provide updated, concise suggestions and ask if further tweaks are needed.',
+};
+
 export const PROMPTS = {
   suggestion: ({ destinations }) => `You are Voyager AI. Based on the selected places, suggest days, best travel months, and a budget band for a decent trip from India.\n\nDestinations: ${destinations.join(', ')}\n\nReturn ONLY valid JSON like:\n{\n  "recommended_days": "8-10",\n  "best_months": "April–June",\n  "estimated_budget": "₹1.8L – ₹2.4L for 2 adults"\n}`,
-
   itinerary: (payload) => `You are Voyager AI, an expert travel planner.\nThe user is vegetarian (Jain-friendly). Plan respectfully.\nReturn structured JSON exactly as the schema describes. No prose outside JSON.\n\nUser Inputs:\n${JSON.stringify(payload, null, 2)}\n\nSchema:\n{\n  "summary": {\n    "recommended_days": "string",\n    "best_months": "string",\n    "estimated_budget": "string",\n    "key_tips": ["string"]\n  },\n  "flights": [ { "from": "string", "to": "string", "date": "YYYY-MM-DD", "airline": "string" } ],\n  "hotels": [ { "city": "string", "name": "string", "checkIn": "YYYY-MM-DD", "checkOut": "YYYY-MM-DD" } ],\n  "daily_plan": [ { "day": "number", "city": "string", "activities": ["string"] } ],\n  "transport": ["string"],\n  "notes": ["string"]\n}`,
 };
 
+const DEFAULT_EXPERIENCE_OPTIONS = [
+  'Adventure',
+  'Relaxation',
+  'Cultural',
+  'Nature',
+  'Luxury',
+];
+
+function inputSpecForStage(stage) {
+  switch (stage) {
+    case STAGES.ask_intent:
+      return { type: 'options', options: ['I have specific locations', 'I only know a region'] };
+    case STAGES.ask_experience:
+      return { type: 'options', options: DEFAULT_EXPERIENCE_OPTIONS };
+    case STAGES.ask_duration:
+      return { type: 'days' };
+    case STAGES.ask_dates:
+      return { type: 'dates' };
+    case STAGES.ask_travelers:
+      return { type: 'options', options: ['Solo Traveler', 'A Couple', 'Family', 'A Group of Friends'] };
+    case STAGES.ask_pace:
+      return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] };
+    case STAGES.ask_interests:
+      return { type: 'multiselect', options: ['History & Museums','Food & Local Cuisine','Adventure & Outdoors','Art & Culture','Nightlife & Entertainment','Shopping','Relaxation & Wellness'] };
+    case STAGES.ask_budget:
+      return { type: 'options', options: ['Budget-Friendly','Mid-Range','Luxury'] };
+    case STAGES.greeting:
+      // Next will be ask_intent which has options
+      return { type: 'options', options: ['I have specific locations', 'I only know a region'] };
+    default:
+      return { type: 'freeText' };
+  }
+}
+
+function buildStagePrompt({ user, stage, message, state }) {
+  const userInfo = user || {};
+  const ctx = state || {};
+  const behavior = EXPECTED_BEHAVIOR[stage] || 'Be concise and helpful. Keep replies short and conversational.';
+  const stageLabel = stage || STAGES.greeting;
+  return [
+    `User Context: ${JSON.stringify(userInfo)}`,
+    `Chat Flow Stage: ${stageLabel}`,
+    `User Input: ${message || ''}`,
+    `Expected Behavior: ${behavior}`,
+    '',
+    'General Rules:',
+    '- Keep replies short, conversational, and context-aware.',
+    '- Ask only one question at a time.',
+    '- Do not produce long lists unless explicitly requested.',
+    '- Use friendly, encouraging tone.',
+    '',
+    'Current Known Details:',
+    JSON.stringify(ctx, null, 2),
+  ].join('\n');
+}
+
 // ------------------ Helpers ------------------
 async function callGemini({ prompt }) {
+  if (!genAI) throw new Error('Gemini not configured');
   const model = genAI.getGenerativeModel({ model: MODEL });
   const resp = await model.generateContent(prompt);
   const text = resp?.response?.text?.();
@@ -45,9 +172,110 @@ export async function generateItinerary(payload) {
   return json;
 }
 
-export async function generateChat({ message, context }) {
-  const prompt = `You are Voyager AI, a helpful travel assistant. Answer the user's question succinctly and helpfully.\n\nContext: ${JSON.stringify(context || {}, null, 2)}\n\nUser: ${message}\nAssistant:`;
-  const text = await callGemini({ prompt });
-  const parsed = tryParseJson(text);
-  return parsed ?? { reply: text };
+// Stage-based chat
+export async function generateChat({ stage = STAGES.greeting, message = '', user = null, state = {} }) {
+  const prompt = buildStagePrompt({ user, stage, message, state });
+  let text = '';
+  try {
+    text = await callGemini({ prompt });
+  } catch (err) {
+    console.error('Gemini chat error', err);
+    // Friendly default per stage
+    const defaults = {
+      [STAGES.greeting]: "Hello! I'm your Voyager.AI assistant. Do you already have a specific list of locations in mind, or only a region?",
+      [STAGES.ask_intent]: 'Would you like to provide specific locations or a general region?',
+      [STAGES.input_locations]: 'Please type the names of the locations you want to explore (comma separated).',
+      [STAGES.input_region]: 'Please type the region or area you’re interested in.',
+      [STAGES.ask_duration]: 'How many days do you plan to travel?',
+      [STAGES.ask_dates]: 'Pick a start date. I’ll auto-calculate the return date from your days.',
+      [STAGES.ask_travelers]: 'Who is traveling? Solo, Couple, Family, or a Group of Friends?',
+      [STAGES.ask_pace]: 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?',
+      [STAGES.ask_interests]: 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)',
+      [STAGES.ask_budget]: 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?',
+      [STAGES.must_haves]: 'Any must-see places or must-do activities?',
+      [STAGES.must_nots]: 'Anything you’d like to avoid? (e.g., big crowds, seafood, too much walking)',
+      [STAGES.generate_suggestions]: 'I’ll generate a concise plan based on your details. Would you like me to proceed?',
+      [STAGES.iterate]: 'Tell me if you want more options, or to focus on a theme or adjust the plan.',
+    };
+    text = defaults[stage] || 'Let’s continue. Please provide the next detail.';
+  }
+  // Prepare response shape and dynamic hints
+  let stageNext = NEXT_STAGE[stage] || null;
+  let hints = undefined;
+  // After locations/region are provided, fetch helpful hints (days, best months)
+  if ((stage === STAGES.input_locations || stage === STAGES.input_region) && (state?.locations?.length || message)) {
+    try {
+      const locations = Array.isArray(state?.locations) && state.locations.length
+        ? state.locations
+        : String(message || '')
+            .split(/,|\n/)
+            .map(s => s.trim())
+            .filter(Boolean);
+      if (locations.length) {
+        const sug = await generateSuggestion({ destinations: locations });
+        hints = { recommended_days: sug.recommended_days, best_months: sug.best_months, estimated_budget: sug.estimated_budget };
+      }
+    } catch {}
+  }
+  // If user already provided locations/region this turn, don't ask them again—advance the conversation prompt to duration
+  const providedLocations = stage === STAGES.input_locations && ((state?.locations && state.locations.length) || message?.trim());
+  const providedRegion = stage === STAGES.input_region && ((state?.region) || message?.trim());
+  if (providedLocations || providedRegion) {
+    const hintDays = hints?.recommended_days ? ` Suggested: ${hints.recommended_days}.` : '';
+    text = `Great, noted.${hintDays} How many days do you plan to travel?`;
+  }
+
+  // Helper to produce the next prompt succinctly
+  function nextPromptFor(next) {
+    switch (next) {
+      case STAGES.ask_dates: {
+        const best = hints?.best_months ? ` Best months: ${hints.best_months}.` : '';
+        return `Pick a start date. I’ll auto-calculate the return date from your days.${best}`;
+      }
+      case STAGES.ask_travelers:
+        return 'Who is traveling? Solo, Couple, Family, or a Group of Friends?';
+      case STAGES.ask_pace:
+        return 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?';
+      case STAGES.ask_interests:
+        return 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)';
+      case STAGES.ask_budget:
+        return 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?';
+      case STAGES.must_haves:
+        return 'Any must-see places or must-do activities?';
+      case STAGES.must_nots:
+        return 'Anything you’d like to avoid? (e.g., big crowds, seafood, too much walking)';
+      case STAGES.generate_suggestions:
+        return 'I’ll generate a concise plan based on your details. Would you like me to proceed?';
+      default:
+        return EXPECTED_BEHAVIOR[next] || 'Let’s continue.';
+    }
+  }
+
+  // If the current stage input is already in state/message, advance the question to the next stage instead of repeating
+  const hasDays = stage === STAGES.ask_duration && ((typeof state?.durationDays === 'number' && state.durationDays > 0) || /\d+/.test(String(message||'')));
+  if (hasDays) text = nextPromptFor(STAGES.ask_dates);
+
+  const hasDates = stage === STAGES.ask_dates && ((state?.startDate && state?.endDate) || /\d{4}-\d{2}-\d{2}/.test(String(message||'')));
+  if (hasDates) text = nextPromptFor(STAGES.ask_travelers);
+
+  const hasTravelers = stage === STAGES.ask_travelers && ((state?.travelers) || /(solo|couple|family|friends)/i.test(String(message||'')));
+  if (hasTravelers) text = nextPromptFor(STAGES.ask_pace);
+
+  const hasPace = stage === STAGES.ask_pace && ((state?.pace) || /(relaxed|balanced|action)/i.test(String(message||'')));
+  if (hasPace) text = nextPromptFor(STAGES.ask_interests);
+
+  const hasInterests = stage === STAGES.ask_interests && ((Array.isArray(state?.interests) && state.interests.length) || /,/.test(String(message||'')));
+  if (hasInterests) text = nextPromptFor(STAGES.ask_budget);
+
+  const hasBudget = stage === STAGES.ask_budget && ((state?.budget) || /(budget|mid|luxury)/i.test(String(message||'')));
+  if (hasBudget) text = nextPromptFor(STAGES.must_haves);
+
+  const hasMustHaves = stage === STAGES.must_haves && ((state?.must_haves) || String(message||'').trim());
+  if (hasMustHaves) text = nextPromptFor(STAGES.must_nots);
+
+  const hasMustNots = stage === STAGES.must_nots && ((state?.must_nots) || String(message||'').trim());
+  if (hasMustNots) text = nextPromptFor(STAGES.generate_suggestions);
+  const input = inputSpecForStage(stageNext ? stageNext : stage);
+  const quickOptions = input.type === 'options' ? input.options : undefined;
+  return { reply: text, stageNext, quickOptions, input, hints };
 }
