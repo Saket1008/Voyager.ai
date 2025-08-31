@@ -46,7 +46,7 @@ export default function Onboarding({ onDone }) {
           <div className="text-xs">Budget</div>
           <div className="flex gap-2">
             {['Budget-Friendly','Mid-Range','Luxury'].map(b => (
-              <button key={b} onClick={() => setProfile(v=>({...v, budget:b}))} className={`px-3 py-1 rounded-md border ${profile.budget===b?'bg:white text-black border-white':'bg-white/10 border-white/20'}`}>{b}</button>
+              <button key={b} onClick={() => setProfile(v=>({...v, budget:b}))} className={`px-3 py-1 rounded-md border ${profile.budget===b?'bg-white text-black border-white':'bg-white/10 border-white/20'}`}>{b}</button>
             ))}
           </div>
         </div>

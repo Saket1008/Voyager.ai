@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
@@ -13,6 +14,7 @@ const { default: itineraryRouter } = await import('./routes/itinerary.js');
 const { default: suggestRouter } = await import('./routes/suggest.js');
 const { default: chatRouter } = await import('./routes/chat.js');
 const { default: dnaRouter } = await import('./routes/dna.js');
+const { authMiddleware } = await import('./middleware/auth.js');
 
 const app = express();
 
@@ -39,15 +41,30 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
+// Basic rate limiting for all API routes
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+});
+app.use('/api/', apiLimiter);
+
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // API routes
-app.use('/api/itinerary', itineraryRouter);
-app.use('/api/suggest', suggestRouter);
-app.use('/api/chat', chatRouter);
-app.use('/api/generate-itinerary', dnaRouter);
+// Public or legacy routes (if any) should be mounted without auth.
+
+// Protected routes (Firebase-authenticated)
+app.use('/api/generate-itinerary', authMiddleware, dnaRouter);
+
+// TODO: Standardize and protect the remaining routes with Firebase auth
+app.use('/api/itinerary', authMiddleware, itineraryRouter);
+app.use('/api/suggest', authMiddleware, suggestRouter);
+app.use('/api/chat', authMiddleware, chatRouter);
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`\n🚀 Server listening on http://localhost:${port}\n`));

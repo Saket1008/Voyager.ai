@@ -4,14 +4,12 @@ import remarkGfm from 'remark-gfm';
 import ItineraryAccordion from './ItineraryAccordion.jsx';
 import ItineraryResults from './ItineraryResults.jsx';
 import { motion, AnimatePresence } from "framer-motion";
-import { useAuth, useUser } from "@clerk/clerk-react";
+// Firebase-first auth: remove Clerk usage
 import { Menu, Plus, Settings, Send, Copy, RefreshCw, Square, Trash2, Check, Landmark, Utensils, Mountain, Palette, PartyPopper, ShoppingBag, Heart } from "lucide-react";
 import JourneyHistory from './JourneyHistory.jsx';
-import { getFirebaseIdToken } from '../lib/firebaseClient';
+import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 
 export default function Chatbox() {
-  const { getToken, isSignedIn } = useAuth();
-  const { user } = useUser();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const makeChat = (title = "New chat") => ({
     id: cryptoRandomId(),
@@ -117,12 +115,16 @@ export default function Chatbox() {
   }
 
   function getUserInfoMinimal() {
-    if (!user) return null;
+    const u = auth?.currentUser;
+    if (!u) return null;
+    const name = u.displayName || '';
+    const [firstName, ...rest] = name ? name.split(' ') : [''];
+    const lastName = rest.join(' ');
     return {
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress,
+      id: u.uid,
+      firstName: firstName || undefined,
+      lastName: lastName || undefined,
+      email: u.email || undefined,
     };
   }
 
@@ -155,7 +157,7 @@ export default function Chatbox() {
   async function greet() {
     try {
       setIsTyping(true);
-      const token = await getToken();
+  const token = await getFirebaseIdToken();
       const base = import.meta.env.VITE_API_BASE || "http://localhost:5000";
   const res = await fetch(`${base}/api/chat`, {
         method: "POST",
@@ -259,7 +261,7 @@ export default function Chatbox() {
     // Send to backend chat
     try {
       setIsTyping(true);
-      const token = await getToken();
+  const token = await getFirebaseIdToken();
       const base = import.meta.env.VITE_API_BASE || "http://localhost:5000";
   const res = await fetch(`${base}/api/chat`, {
         method: "POST",
@@ -426,8 +428,8 @@ export default function Chatbox() {
             <IconButton onClick={() => setSidebarOpen((s) => !s)} ariaLabel="Toggle sidebar" className="md:opacity-100"><Menu size={18} /></IconButton>
             <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 text-sm font-medium text-white">Voyager.AI</div>
             <div className="ml-auto flex items-center gap-3 text-sm text-white/80">
-              {isSignedIn && user ? (
-                <span>Welcome, {user.firstName || user.username || "Explorer"}</span>
+              {auth?.currentUser ? (
+                <span>Welcome, {auth.currentUser.displayName || auth.currentUser.email || "Explorer"}</span>
               ) : null}
               <IconButton onClick={newChat} ariaLabel="New chat"><Plus size={18} /></IconButton>
               <IconButton onClick={() => {}} ariaLabel="Settings"><Settings size={18} /></IconButton>
