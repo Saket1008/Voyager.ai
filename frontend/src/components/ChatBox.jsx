@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, useUser } from "@clerk/clerk-react";
-import { Menu, Plus, Settings, Send, Copy, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Menu, Plus, Settings, Send, Copy, RefreshCw, Square, Trash2, Check, Landmark, Utensils, Mountain, Palette, PartyPopper, ShoppingBag, Heart } from "lucide-react";
 
 export default function Chatbox() {
   const { getToken, isSignedIn } = useAuth();
@@ -38,6 +40,49 @@ export default function Chatbox() {
   useEffect(() => { scrollToBottom(); }, [activeChat?.messages.length, isTyping]);
   // Reset multiselect when input type changes
   useEffect(() => { setMultiSel([]); }, [inputSpec?.type, stage]);
+
+  // ---- Persistence: load saved state on mount ----
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("voyager_chat_state");
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        if (Array.isArray(saved.chats) && saved.chats.length) setChats(saved.chats);
+        if (saved.activeId) setActiveId(saved.activeId);
+        if (saved.stage) setStage(saved.stage);
+        if (saved.inputSpec) setInputSpec(saved.inputSpec);
+        if (Array.isArray(saved.quickOptions)) setQuickOptions(saved.quickOptions);
+        if (saved.flowState && typeof saved.flowState === 'object') setFlowState(saved.flowState);
+        if (saved.hints) setHints(saved.hints);
+        if (typeof saved.uiDays === 'number') setUiDays(saved.uiDays);
+        if (typeof saved.uiDaysFlex === 'boolean') setUiDaysFlex(saved.uiDaysFlex);
+        if (typeof saved.uiStartDate === 'string') setUiStartDate(saved.uiStartDate);
+        if (typeof saved.uiDateFlex === 'string') setUiDateFlex(saved.uiDateFlex);
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Persistence: save when key state changes ----
+  useEffect(() => {
+    try {
+      const payload = {
+        chats,
+        activeId,
+        stage,
+        inputSpec,
+        quickOptions,
+        flowState,
+        hints,
+        uiDays,
+        uiDaysFlex,
+        uiStartDate,
+        uiDateFlex,
+      };
+      localStorage.setItem("voyager_chat_state", JSON.stringify(payload));
+    } catch { /* ignore */ }
+  }, [chats, activeId, stage, inputSpec, quickOptions, flowState, hints, uiDays, uiDaysFlex, uiStartDate, uiDateFlex]);
 
   function newChat() {
     const chat = makeChat();
@@ -266,14 +311,20 @@ export default function Chatbox() {
   function MessageBubble({ m }) {
     const isUser = m.role === "user";
     return (
-      <div className={`group relative w-fit max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-[0_0_30px_rgba(59,130,246,0.08)] ${isUser ? "ml-auto bg-gradient-to-r from-blue-600/90 to-indigo-600/90 text-white" : "bg-white/10 backdrop-blur-md border border-white/20 text-white"}`}>
-        <div className="whitespace-pre-wrap">{m.text}</div>
+      <div className={`group relative w-fit max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
+            ? "ml-auto bg-blue-500/10 backdrop-blur-md border border-blue-300/20 ring-1 ring-blue-200/5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]"
+            : "bg-white/5 backdrop-blur-md border border-white/15 ring-1 ring-white/5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]"
+        }`}>
+        <div className="prose prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-h1:mt-0 prose-h1:mb-2 prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-2">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+        </div>
         {!isUser && (
           <div className="mt-2 flex items-center gap-1">
-            <button title="Regenerate" onClick={() => simulateStreamReply(m.text)} className="grid h-7 w-7 place-items-center rounded-md border border-white/20 bg-black/40 hover:bg-black/60"><RefreshCw size={12} /></button>
-            <button title="Copy" onClick={() => copy(m.text)} className="grid h-7 w-7 place-items-center rounded-md border border-white/20 bg-black/40 hover:bg-black/60"><Copy size={12} /></button>
+            <button title="Regenerate" onClick={() => simulateStreamReply(m.text)} className="grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><RefreshCw size={12} /></button>
+            <button title="Copy" onClick={() => copy(m.text)} className="grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><Copy size={12} /></button>
             {isTyping ? (
-              <button title="Stop" onClick={stopGenerating} className="ml-1 grid h-7 w-7 place-items-center rounded-md border border-white/20 bg-black/40 hover:bg-black/60"><Square size={12} /></button>
+              <button title="Stop" onClick={stopGenerating} className="ml-1 grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><Square size={12} /></button>
             ) : null}
           </div>
         )}
@@ -283,11 +334,11 @@ export default function Chatbox() {
   function StreamingBubble() {
     if (!isTyping || !activeChat) return null;
     return (
-      <div className="w-fit max-w-[85%] rounded-2xl px-4 py-3 text-sm bg-white/10 backdrop-blur-md border border-white/20 text-white shadow-[0_0_30px_rgba(236,72,153,0.08)]">
+  <div className="w-fit max-w-[85%] rounded-2xl px-4 py-3 text-sm bg-white/5 backdrop-blur-md border border-white/15 ring-1 ring-white/5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
         <div className="min-h-[1lh] whitespace-pre-wrap">{streamBufferRef.current || "Typing…"}</div>
         <div className="mt-2 flex items-center gap-1">
-          <button title="Regenerate" onClick={() => simulateStreamReply("repeat last")} className="grid h-7 w-7 place-items-center rounded-md border border-white/20 bg-black/40 hover:bg-black/60"><RefreshCw size={12} /></button>
-          <button title="Stop" onClick={stopGenerating} className="grid h-7 w-7 place-items-center rounded-md border border-white/20 bg-black/40 hover:bg-black/60"><Square size={12} /></button>
+          <button title="Regenerate" onClick={() => simulateStreamReply("repeat last")} className="grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><RefreshCw size={12} /></button>
+          <button title="Stop" onClick={stopGenerating} className="grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><Square size={12} /></button>
         </div>
       </div>
     );
@@ -333,7 +384,7 @@ export default function Chatbox() {
           </div>
           {/* Stage-specific panels that appear in the flow area (days/dates) */}
           {inputSpec?.type === 'days' ? (
-            <div className="mb-3 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md p-3 shadow-sm">
+            <div className="mb-3 rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 backdrop-blur-md p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
               <div className="flex items-center justify-between">
                 <div className="text-sm">How many days?</div>
                 {hints?.recommended_days || hints?.best_months ? (
@@ -344,9 +395,9 @@ export default function Chatbox() {
                 ) : null}
               </div>
               <div className="mt-2 flex items-center gap-3">
-                <button className="h-8 w-8 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20" onClick={() => setUiDays((d) => Math.max(1, d - 1))}>-</button>
+                <button className="h-8 w-8 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={() => setUiDays((d) => Math.max(1, d - 1))}>-</button>
                 <div className="min-w-10 text-center text-sm">{uiDays} days</div>
-                <button className="h-8 w-8 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20" onClick={() => setUiDays((d) => d + 1)}>+</button>
+                <button className="h-8 w-8 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={() => setUiDays((d) => d + 1)}>+</button>
               </div>
               <label className="mt-3 flex items-center gap-2 text-xs text-white/90">
                 <input type="checkbox" checked={uiDaysFlex} onChange={(e) => setUiDaysFlex(e.target.checked)} />
@@ -361,13 +412,13 @@ export default function Chatbox() {
             </div>
           ) : null}
           {inputSpec?.type === 'dates' ? (
-            <div className="mb-3 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md p-3 shadow-sm">
+            <div className="mb-3 rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 backdrop-blur-md p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
               <div className="flex items-center justify-between">
                 <div className="text-sm">Select your start date</div>
                 {hints?.best_months ? (<div className="text-[11px] text-white/80">Best months: {hints.best_months}</div>) : null}
               </div>
               <div className="mt-2 flex items-center gap-3">
-                <input type="date" value={uiStartDate} onChange={(e) => setUiStartDate(e.target.value)} className="rounded-lg border border-white/20 bg-transparent px-3 py-1.5 text-sm outline-none" />
+                 <input type="date" value={uiStartDate} onChange={(e) => setUiStartDate(e.target.value)} className="rounded-lg border border-white/15 bg-transparent px-3 py-1.5 text-sm outline-none" />
                 <div className="text-xs text-white/80">
                   {(() => {
                     const days = Number(flowState?.durationDays) || uiDays || 7;
@@ -384,9 +435,9 @@ export default function Chatbox() {
                 <div className="mt-3">
                   <div className="text-xs mb-1">Date flexibility</div>
                   <div className="flex flex-wrap gap-2 text-xs">
-                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='none'?'border-white/50':'border-white/20'} bg-white/10 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='none'} onChange={() => setUiDateFlex('none')} /> No flexibility </label>
-                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='start'?'border-white/50':'border-white/20'} bg-white/10 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='start'} onChange={() => setUiDateFlex('start')} /> Flexible around start date </label>
-                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='all'?'border-white/50':'border-white/20'} bg-white/10 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='all'} onChange={() => setUiDateFlex('all')} /> Okay with full flexibility </label>
+                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='none'?'border-white/40':'border-white/15'} bg-white/5 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='none'} onChange={() => setUiDateFlex('none')} /> No flexibility </label>
+                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='start'?'border-white/40':'border-white/15'} bg-white/5 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='start'} onChange={() => setUiDateFlex('start')} /> Flexible around start date </label>
+                    <label className={`flex items-center gap-2 rounded-lg border ${uiDateFlex==='all'?'border-white/40':'border-white/15'} bg-white/5 px-2 py-1`}> <input type="radio" name="dateflex" checked={uiDateFlex==='all'} onChange={() => setUiDateFlex('all')} /> Okay with full flexibility </label>
                   </div>
                 </div>
               ) : null}
@@ -405,7 +456,7 @@ export default function Chatbox() {
           ) : null}
           <div className="sticky bottom-3 z-10">
       {inputSpec?.type === 'options' && quickOptions?.length ? (
-              <div className="rounded-xl border border-white/20 bg-white/10 backdrop-blur-md backdrop-saturate-150 p-3 shadow-lg">
+              <div className="rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 backdrop-blur-md backdrop-saturate-150 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
         <div className="mb-2 text-[12px] text-white/80">Choose one</div>
                 <AnimatePresence>
                   <div className="flex flex-wrap gap-2">
@@ -416,8 +467,17 @@ export default function Chatbox() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 8, scale: 0.98 }}
                         transition={{ delay: idx * 0.03, duration: 0.18 }}
-                        onClick={() => send(q)}
-                        className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs hover:bg-white/20 transition-colors shadow-sm"
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          // Special-case: quick action to generate itinerary
+                          if (q.toLowerCase().includes('generate itinerary')) {
+                            send('Generate itinerary', undefined, 'generate_suggestions');
+                          } else {
+                            send(q);
+                          }
+                        }}
+                        className="rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 px-4 py-2 text-xs hover:bg-white/10 transition-colors shadow-sm"
                       >
                         {q}
                       </motion.button>
@@ -427,12 +487,13 @@ export default function Chatbox() {
               </div>
             ) : null}
             {inputSpec?.type === 'multiselect' && quickOptions?.length ? (
-              <div className="rounded-xl border border-white/20 bg-white/10 backdrop-blur-md backdrop-saturate-150 p-3 shadow-lg">
+              <div className="rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 backdrop-blur-md backdrop-saturate-150 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
                 <div className="mb-2 text-[12px] text-white/80">Choose any</div>
                 <AnimatePresence>
                   <div className="flex flex-wrap gap-2">
                     {quickOptions.map((q, idx) => {
                       const active = multiSel.includes(q);
+                      const Icon = interestIcon(q);
                       return (
                         <motion.button
                           key={q}
@@ -440,10 +501,15 @@ export default function Chatbox() {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 8, scale: 0.98 }}
                           transition={{ delay: idx * 0.03, duration: 0.18 }}
+                          whileHover={{ scale: 1.03 }}
+                          whileTap={{ scale: 0.97 }}
                           onClick={() => setMultiSel((arr) => (arr.includes(q) ? arr.filter((x) => x !== q) : [...arr, q]))}
-                          className={`rounded-xl border px-4 py-2 text-xs transition-colors shadow-sm ${active ? 'bg-white/25 border-white/50' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}
+                          className={`group inline-flex items-center gap-2 rounded-xl border ring-1 ring-white/5 px-3 py-2 text-xs transition-colors shadow-sm ${active ? 'bg-white/20 border-white/40 shadow-[0_0_20px_rgba(255,255,255,0.08)]' : 'bg-white/5 border-white/15 hover:bg-white/10'}`}
                         >
-                          {q}
+                          <span className={`grid h-5 w-5 place-items-center rounded-md ${active ? 'bg-white/70 text-black' : 'bg-white/15 text-white'}`}>
+                            {active ? <Check size={12} /> : (Icon ? <Icon size={12} /> : null)}
+                          </span>
+                          <span>{q}</span>
                         </motion.button>
                       );
                     })}
@@ -464,8 +530,18 @@ export default function Chatbox() {
               </div>
             ) : null}
             {inputSpec?.type === 'freeText' ? (
-              <div className="rounded-xl border border-white/20 bg-white/10 backdrop-blur-md backdrop-saturate-150 p-2 shadow-lg">
-                <textarea rows={1} placeholder="Type your answer…" className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-gray-400" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+              <div className="rounded-xl border border-white/15 ring-1 ring-white/5 bg-white/5 backdrop-blur-md backdrop-saturate-150 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]">
+                <textarea rows={1} placeholder={freeTextPlaceholder(stage)} className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-gray-400" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+                {(stage === 'input_locations' || stage === 'input_region') ? (
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pb-1">
+                    <div className="text-[11px] text-white/70 mr-1">Example:</div>
+                    {exampleSuggestions(stage).map((ex) => (
+            <button key={ex} onClick={() => setInput(ex)} className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/90 hover:bg-white/10">
+                        {ex}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between px-2">
                   <div className="text-[11px] text-gray-400">Enter to send • Shift+Enter for newline</div>
                   <button onClick={() => send()} className="rounded-lg bg-[#19c37d] px-3 py-1.5 text-xs font-medium text-white hover:brightness-105 active:translate-y-[1px]"><div className="flex items-center gap-1"><Send size={14} /> Send</div></button>
@@ -491,4 +567,36 @@ function generateAssistantText(prompt) { const responses = [
   `Based on your preferences, I can suggest some amazing destinations and experiences. Let me create a comprehensive plan that balances adventure, relaxation, and cultural immersion.`,
   `I'd love to help you explore new horizons! Your request sounds fantastic, and I'll make sure to include all the details you need for a perfect journey.`,
 ]; return responses[Math.floor(Math.random() * responses.length)]; }
+function interestIcon(label) {
+  const l = (label || '').toLowerCase();
+  if (l.includes('history') || l.includes('museum')) return Landmark;
+  if (l.includes('food') || l.includes('cuisine')) return Utensils;
+  if (l.includes('adventure') || l.includes('outdoors')) return Mountain;
+  if (l.includes('art') || l.includes('culture')) return Palette;
+  if (l.includes('nightlife') || l.includes('entertainment')) return PartyPopper;
+  if (l.includes('shopping')) return ShoppingBag;
+  if (l.includes('relax') || l.includes('wellness') || l.includes('spa')) return Heart;
+  return null;
+}
+
+function freeTextPlaceholder(stage) {
+  switch (stage) {
+    case 'input_locations':
+      return 'Type locations, comma-separated (e.g., Paris, Zurich, Lake Como)…';
+    case 'input_region':
+      return 'Type the region or area (e.g., Southeast Asia, Northern Italy)…';
+    default:
+      return 'Type your answer…';
+  }
+}
+
+function exampleSuggestions(stage) {
+  if (stage === 'input_locations') {
+    return ['Paris, Zurich, Lake Como', 'Kyoto, Osaka, Nara', 'New York, Boston'];
+  }
+  if (stage === 'input_region') {
+    return ['Southeast Asia', 'Northern Italy', 'Pacific Northwest'];
+  }
+  return [];
+}
 

@@ -81,6 +81,27 @@ export const PROMPTS = {
   itinerary: (payload) => `You are Voyager AI, an expert travel planner.\nThe user is vegetarian (Jain-friendly). Plan respectfully.\nReturn structured JSON exactly as the schema describes. No prose outside JSON.\n\nUser Inputs:\n${JSON.stringify(payload, null, 2)}\n\nSchema:\n{\n  "summary": {\n    "recommended_days": "string",\n    "best_months": "string",\n    "estimated_budget": "string",\n    "key_tips": ["string"]\n  },\n  "flights": [ { "from": "string", "to": "string", "date": "YYYY-MM-DD", "airline": "string" } ],\n  "hotels": [ { "city": "string", "name": "string", "checkIn": "YYYY-MM-DD", "checkOut": "YYYY-MM-DD" } ],\n  "daily_plan": [ { "day": "number", "city": "string", "activities": ["string"] } ],\n  "transport": ["string"],\n  "notes": ["string"]\n}`,
 };
 
+// Master Markdown itinerary prompt
+function markdownItineraryPrompt({ user, state }) {
+  const u = user || {};
+  const s = state || {};
+  const parts = [];
+  if (Array.isArray(s.locations) && s.locations.length) parts.push(`Destinations: ${s.locations.join(', ')}`);
+  if (s.region) parts.push(`Region: ${s.region}`);
+  if (s.durationDays) parts.push(`Duration: ${s.durationDays} days${s.durationFlex ? ' (±2 flex)' : ''}`);
+  if (s.startDate && s.endDate) parts.push(`Dates: ${s.startDate} → ${s.endDate}${s.dateFlex && s.dateFlex!=='none' ? ` (flex: ${s.dateFlex})` : ''}`);
+  if (s.travelers) parts.push(`Travelers: ${s.travelers}`);
+  if (s.pace) parts.push(`Pace: ${s.pace}`);
+  if (Array.isArray(s.interests) && s.interests.length) parts.push(`Interests: ${s.interests.join(', ')}`);
+  if (s.budget) parts.push(`Budget: ${s.budget}`);
+  if (s.must_haves) parts.push(`Must-haves: ${s.must_haves}`);
+  if (s.must_nots) parts.push(`Must-nots: ${s.must_nots}`);
+
+  const userLine = u.firstName ? `${u.firstName}${u.lastName ? ' ' + u.lastName : ''}` : (u.email || 'Traveler');
+
+  return `Master Prompt for Voyager AI Itinerary Generation\n\nRole: You are a world-class travel expert and an elite itinerary planner named Voyager. Your responses are not just suggestions; they are comprehensive, actionable plans designed to give a traveler a seamless and unforgettable experience. You are meticulous, insightful, and always provide practical, insider-level details.\n\nTask: Create a hyper-detailed, day-by-day travel itinerary based on the following user requirements. The output must be in well-structured Markdown format.\n\nUser Requirements (from chat):\n${parts.map(p=>`- ${p}`).join('\n') || '- User will specify during planning'}\n\nOutput Structure and Content Requirements (Strictly Follow This Format):\n\nMain Title: Start with a title like # Your Hyper-Detailed Itinerary: [Destination(s)].\n\nTrip Overview Section: Create a brief summary section that includes:\n\n- A one-sentence evocative overview of the trip.\n- Travel Dates\n- Focus\n- Pace\n- Budget\n\nPart-by-Part Breakdown:\n\nDivide the itinerary into ### Part X: [City Name], [Country] ([Number of Days]).\n\nUnder each Part heading, add a short, italicized, one-sentence description of the location's essence.\n\nDay-by-Day Plan:\n\nFor each day, use a #### Day X: [Creative Day Theme] ([Date]) heading.\n\nBreak down each day into Morning, Afternoon, and Evening using bolded subheadings.\n\nFor each activity, you MUST include the following types of details:\n\n- Specific Names: Mention specific landmarks, museums, restaurants, cafes, or parks (e.g., "Le Bouillon Chartier," not just "a French restaurant").\n- Logistical Details: Provide practical transportation info. Include specific train/metro lines, station names, approximate journey times, and estimated costs (e.g., "Take the RER B train (approx. €12, ~45 mins journey)...").\n- Actionable Tips & Insider Knowledge: Give crucial advice that enhances the experience. Examples: "You MUST pre-book your timed-entry ticket online weeks in advance," or "Enter via the Carrousel du Louvre entrance to find shorter security lines."\n- Food & Dining: For every suggested restaurant, provide the cuisine type and an estimated budget per person (e.g., "Cuisine: Classic French. Budget: €15-€25 per person.").\n- Alternatives & "Hidden Gems": Where appropriate, suggest an alternative option for a restaurant or activity. Include at least one "Hidden Gem" tip per city to make the itinerary feel special and unique.\n- Contingency Plans: For outdoor-heavy days, include a "Bad Weather Plan B."\n\nTone and Language: Write in a clear, encouraging, and highly informative tone. Use **bolding** to highlight key places and tips.\n\nAt the end, include a short section titled ### Practical Notes (Tickets, Passes, and Money-Savers) with 4–6 bullet points specific to this trip.\n`;
+}
+
 const DEFAULT_EXPERIENCE_OPTIONS = [
   'Adventure',
   'Relaxation',
@@ -170,6 +191,15 @@ export async function generateItinerary(payload) {
   const json = tryParseJson(text);
   if (!json) throw new Error('Gemini itinerary parsing failed');
   return json;
+}
+
+export async function generateItineraryMarkdown({ user = null, state = {} }) {
+  const prompt = markdownItineraryPrompt({ user, state });
+  const text = await callGemini({ prompt });
+  // Return raw Markdown text; if model returned fenced code, strip once
+  const cleaned = (text || '').replace(/^```(markdown)?/i, '').replace(/```$/i, '').trim();
+  if (!cleaned) throw new Error('Gemini returned empty markdown');
+  return cleaned;
 }
 
 // Stage-based chat
@@ -276,6 +306,29 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   const hasMustNots = stage === STAGES.must_nots && ((state?.must_nots) || String(message||'').trim());
   if (hasMustNots) text = nextPromptFor(STAGES.generate_suggestions);
   const input = inputSpecForStage(stageNext ? stageNext : stage);
-  const quickOptions = input.type === 'options' ? input.options : undefined;
+  let quickOptions = input.type === 'options' ? input.options : undefined;
+
+  // If we're at the generation stage, allow immediate itinerary generation in Markdown
+  if (stage === STAGES.generate_suggestions) {
+    // Offer a one-tap option
+    quickOptions = ['Generate itinerary'];
+    const wantsGenerate = /\b(generate|create|proceed|yes)\b/i.test(String(message || ''));
+    const hasCore = (state?.locations?.length || state?.region) && (state?.durationDays || (state?.startDate && state?.endDate));
+    if (wantsGenerate || hasCore) {
+      try {
+        const md = await generateItineraryMarkdown({ user, state });
+        text = md; // Return the markdown document
+        stageNext = STAGES.iterate;
+        // After generation, invite refinement
+        quickOptions = ['Change dates', 'Adjust pace', 'Focus on food', 'Add hidden gems'];
+      } catch (e) {
+        // Fall back to a concise confirmation prompt
+        text = text || 'I can generate your detailed itinerary now. Shall I proceed?';
+      }
+    } else {
+      text = text || 'I can generate your detailed itinerary now. Shall I proceed?';
+    }
+  }
+
   return { reply: text, stageNext, quickOptions, input, hints };
 }
