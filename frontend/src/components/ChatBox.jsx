@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ItineraryAccordion from './ItineraryAccordion.jsx';
+import ItineraryResults from './ItineraryResults.jsx';
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { Menu, Plus, Settings, Send, Copy, RefreshCw, Square, Trash2, Check, Landmark, Utensils, Mountain, Palette, PartyPopper, ShoppingBag, Heart } from "lucide-react";
+import JourneyHistory from './JourneyHistory.jsx';
+import { getFirebaseIdToken } from '../lib/firebaseClient';
 
 export default function Chatbox() {
   const { getToken, isSignedIn } = useAuth();
@@ -99,6 +103,15 @@ export default function Chatbox() {
   }
   function pushMessage(role, text) {
     setChats((prev) => prev.map((c) => (c.id === activeId ? { ...c, messages: [...c.messages, { id: cryptoRandomId(), role, text }] } : c)));
+    // Persist last generated itinerary markdown for the standalone UI page
+    try {
+      if (role === 'assistant' && typeof text === 'string') {
+        const looksLikeMd = /(^|\n)#[^\n]+Itinerary/i.test(text) || (/(^|\n)####\s*Day\s+1:/i.test(text) && /\*\*Morning:\*\*/.test(text));
+        if (looksLikeMd) {
+          localStorage.setItem('voyager_last_itinerary_md', text);
+        }
+      }
+    } catch { /* ignore */ }
     // ensure scroll after DOM updates
     setTimeout(() => scrollToBottom(), 0);
   }
@@ -285,6 +298,24 @@ export default function Chatbox() {
       setIsTyping(false);
     }
   }
+
+  async function generateWithDNA(prompt = '') {
+    try {
+      setIsTyping(true);
+      const token = await getFirebaseIdToken();
+      const base = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+      const res = await fetch(`${base}/api/generate-itinerary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token? { Authorization: `Bearer ${token}` }: {}) },
+        body: JSON.stringify({ prompt: prompt || 'Mumbai, 6 days' })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      pushMessage('assistant', data.itinerary || JSON.stringify(data));
+    } catch (e) {
+      pushMessage('assistant', 'Unable to generate using Traveler\'s DNA (auth required). You can still continue via chat.');
+    } finally { setIsTyping(false); }
+  }
   function stopGenerating() {
     if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
     if (streamBufferRef.current) { pushMessage("assistant", streamBufferRef.current); streamBufferRef.current = ""; }
@@ -310,15 +341,39 @@ export default function Chatbox() {
 
   function MessageBubble({ m }) {
     const isUser = m.role === "user";
+    const isItinerary = looksLikeItinerary(m.text);
+    const [itView, setItView] = useState('results'); // 'results' | 'accordion' | 'markdown'
     return (
       <div className={`group relative w-fit max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isUser
             ? "ml-auto bg-blue-500/10 backdrop-blur-md border border-blue-300/20 ring-1 ring-blue-200/5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]"
             : "bg-white/5 backdrop-blur-md border border-white/15 ring-1 ring-white/5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_30px_rgba(2,6,23,0.35)]"
         }`}>
-        <div className="prose prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-h1:mt-0 prose-h1:mb-2 prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-2">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
-        </div>
+        {isItinerary ? (
+      <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-white/60">Detected itinerary</div>
+              <div className="flex gap-1">
+                <button onClick={() => setItView('results')} className={`text-[11px] px-2 py-1 rounded-md border ${itView==='results' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/15'}`}>Results</button>
+                <button onClick={() => setItView('accordion')} className={`text-[11px] px-2 py-1 rounded-md border ${itView==='accordion' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/15'}`}>Accordion</button>
+                <button onClick={() => setItView('markdown')} className={`text-[11px] px-2 py-1 rounded-md border ${itView==='markdown' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/15'}`}>Markdown</button>
+        <button title="Copy Markdown" onClick={() => copy(m.text)} className="text-[11px] px-2 py-1 rounded-md bg-white/10 border border-white/15">Copy MD</button>
+        <button title="Open Window" onClick={() => openItineraryWindow(m.text)} className="text-[11px] px-2 py-1 rounded-md bg-white/10 border border-white/15">Open Window</button>
+              </div>
+            </div>
+            {itView === 'results' ? (
+              <ItineraryResults md={m.text} />
+            ) : itView === 'accordion' ? (
+              <ItineraryAccordion md={m.text} />
+            ) : (
+              <div className="prose prose-invert max-w-none text-sm whitespace-pre-wrap">{m.text}</div>
+            )}
+          </div>
+        ) : (
+          <div className="prose prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-h1:mt-0 prose-h1:mb-2 prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-2">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+          </div>
+        )}
         {!isUser && (
           <div className="mt-2 flex items-center gap-1">
             <button title="Regenerate" onClick={() => simulateStreamReply(m.text)} className="grid h-7 w-7 place-items-center rounded-md border border-white/15 bg-black/30 hover:bg-black/45"><RefreshCw size={12} /></button>
@@ -360,6 +415,9 @@ export default function Chatbox() {
               </div>
             </div>
           ))}
+        </div>
+        <div className="border-t border-white/15">
+          <JourneyHistory />
         </div>
       </aside>
       <div className="flex h-full min-h-0 flex-1 flex-col bg-transparent">
@@ -544,7 +602,10 @@ export default function Chatbox() {
                 ) : null}
                 <div className="flex items-center justify-between px-2">
                   <div className="text-[11px] text-gray-400">Enter to send • Shift+Enter for newline</div>
-                  <button onClick={() => send()} className="rounded-lg bg-[#19c37d] px-3 py-1.5 text-xs font-medium text-white hover:brightness-105 active:translate-y-[1px]"><div className="flex items-center gap-1"><Send size={14} /> Send</div></button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => generateWithDNA(input)} className="rounded-lg bg-white/10 border border-white/15 px-3 py-1.5 text-[11px] text-white hover:bg-white/15">Use Traveler's DNA</button>
+                    <button onClick={() => send()} className="rounded-lg bg-[#19c37d] px-3 py-1.5 text-xs font-medium text-white hover:brightness-105 active:translate-y-[1px]"><div className="flex items-center gap-1"><Send size={14} /> Send</div></button>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -567,6 +628,15 @@ function generateAssistantText(prompt) { const responses = [
   `Based on your preferences, I can suggest some amazing destinations and experiences. Let me create a comprehensive plan that balances adventure, relaxation, and cultural immersion.`,
   `I'd love to help you explore new horizons! Your request sounds fantastic, and I'll make sure to include all the details you need for a perfect journey.`,
 ]; return responses[Math.floor(Math.random() * responses.length)]; }
+function looksLikeItinerary(text) {
+  if (!text || typeof text !== 'string') return false;
+  return (/^#\s+.*Itinerary/i.test(text) && /####\s*Day\s+1:/i.test(text)) || (/\*\*Morning:\*\*/.test(text) && /\*\*Evening:\*\*/.test(text));
+}
+function openItineraryWindow(md) {
+  try { localStorage.setItem('voyager_last_itinerary_md', md || ''); } catch {}
+  const url = (typeof window !== 'undefined') ? (window.origin + '/itinerary.html') : '/itinerary.html';
+  window.open(url, 'voyager-itinerary', 'width=1200,height=800,noopener,noreferrer');
+}
 function interestIcon(label) {
   const l = (label || '').toLowerCase();
   if (l.includes('history') || l.includes('museum')) return Landmark;

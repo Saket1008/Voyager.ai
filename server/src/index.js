@@ -12,6 +12,7 @@ dotenv.config({ path: resolve(__dirname, '../.env') });
 const { default: itineraryRouter } = await import('./routes/itinerary.js');
 const { default: suggestRouter } = await import('./routes/suggest.js');
 const { default: chatRouter } = await import('./routes/chat.js');
+const { default: dnaRouter } = await import('./routes/dna.js');
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/itinerary', itineraryRouter);
 app.use('/api/suggest', suggestRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/generate-itinerary', dnaRouter);
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`\n🚀 Server listening on http://localhost:${port}\n`));
