@@ -23,3 +23,6 @@ export async function authMiddleware(req, res, next) {
   }
 }
 
+// Back-compat alias for older route imports
+export const mustBeAuthed = authMiddleware;
+

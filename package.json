@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Voyager AI - Intelligent Travel Itinerary Generator",
   "scripts": {
-    "predev": "kill-port 5000 5173 || exit 0",
+  "predev": "node scripts/kill-ports.js",
     "dev": "concurrently -k -n server,frontend -c blue,magenta \"npm run dev:server\" \"npm run dev:frontend\"",
     "dev:server": "cd server && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",

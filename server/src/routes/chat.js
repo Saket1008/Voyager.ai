@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import { mustBeAuthed } from '../middleware/auth.js';
 import { generateSuggestion, generateItinerary, generateChat, STAGES } from '../services/ai.js';
 
 const router = Router();
-// router.use(mustBeAuthed); // Temporarily disabled for public chat access
 
 // POST /api/chat
 // Body: { mode: 'chat' | 'itinerary' | 'suggest', message?, payload? }

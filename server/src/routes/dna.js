@@ -1,60 +1,94 @@
 import { Router } from 'express';
 import { ensureFirebaseAdmin } from '../services/firebaseAdmin.js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getGeminiResponse } from '../services/ai.js';
 
 const router = Router();
 
-function getGenAI() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY not set');
-  return new GoogleGenerativeAI(key);
-}
-
-function createGeminiPrompt(userData, userQuery) {
+// Build the JSON-focused master prompt per the new spec
+function createJsonPrompt(userData, userQuery) {
   const name = userData?.name || 'Traveler';
-  const travelProfile = userData?.travelProfile || {};
-  const foodProfile = userData?.foodProfile || {};
-  const join = (v) => Array.isArray(v) ? v.join(', ') : (v || '');
-  return `You are a world-class personal travel expert for a user named ${name}. Your task is to create a hyper-detailed, day-by-day travel itinerary based on their specific profile and request.\n\n**USER'S PERMANENT PROFILE (DO NOT DEVIATE):**\n- **Travel Pace:** ${travelProfile.pace || ''}\n- **Budget:** ${travelProfile.budget || ''}\n- **Interests:** ${join(travelProfile.interests)}\n- **Dietary Needs:** ${join(foodProfile.dietaryRestrictions)}\n- **Favorite Cuisines:** ${join(foodProfile.favoriteCuisines)}\n- **Must Avoid Foods:** ${join(foodProfile.mustAvoid)}\n\nAcknowledge these preferences in your recommendations (e.g., recommend specific vegetarian restaurants). The output must be in well-structured Markdown format.\n\n**USER'S CURRENT REQUEST:**\n"${userQuery || ''}"`;
+  const tp = userData?.travelProfile || {};
+  const fp = userData?.foodProfile || {};
+  const join = (v) => (Array.isArray(v) ? v.join(', ') : (v || 'not specified'));
+  return `
+**ROLE:** You are a world-class, AI-powered travel expert named "Voyager".
+
+**TASK:** Your primary task is to generate a structured, day-by-day travel itinerary based on a user's specific profile and their direct request. The output **MUST** be a valid JSON object containing a single key, "itinerary", which holds an array of itinerary item objects.
+
+**USER PROFILE (Strictly adhere to these preferences):**
+- **User's Name:** ${name}
+- **Travel Pace:** ${tp.pace || 'not specified'}
+- **Budget:** ${tp.budget || 'not specified'}
+- **Interests:** ${join(tp.interests)}
+- **Dietary Restrictions:** ${join(fp.dietaryRestrictions)}
+- **Favorite Cuisines:** ${join(fp.favoriteCuisines)}
+
+**USER's CURRENT REQUEST:**
+"${userQuery || ''}"
+
+**JSON OUTPUT REQUIREMENTS (MANDATORY):**
+
+Your entire response **MUST** be a single JSON object. Do not include any text, markdown formatting, or explanations outside of the JSON structure.
+
+The JSON object must have one root key: "itinerary".
+The value of "itinerary" must be an array [].
+Each object inside the array represents one event or item in the itinerary and **MUST** contain the following four keys:
+
+1.  "time" (string): A specific time (e.g., "9:00 AM", "Afternoon", "Evening") or a general label like "Morning Activity".
+2.  "title" (string): A short, descriptive title for the event (e.g., "Visit the Senso-ji Temple", "Dinner at Ichiran Ramen").
+3.  "description" (string): A one or two-sentence description of the activity, including why it matches the user's profile.
+4.  "type" (string): The category of the event. Must be one of the following exact values: food, activity, lodging, info, or tip.
+
+`;
 }
 
 router.post('/', async (req, res) => {
+  const admin = ensureFirebaseAdmin();
+  if (!admin) return res.status(500).json({ message: 'Firebase Admin not configured.' });
   try {
-    const admin = ensureFirebaseAdmin();
-    if (!admin) return res.status(500).json({ error: 'Firebase admin not configured' });
-    const idHeader = req.headers.authorization || '';
-    const token = idHeader.startsWith('Bearer ') ? idHeader.slice(7) : null;
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-    const decoded = await admin.auth().verifyIdToken(token);
-    const uid = decoded.uid;
-    const snap = await admin.firestore().collection('users').doc(uid).get();
-    if (!snap.exists) return res.status(404).json({ error: 'User profile not found' });
-    const userData = snap.data();
-    const userQuery = req.body?.prompt || '';
-    const prompt = createGeminiPrompt(userData, userQuery);
-    const genAI = getGenAI();
-    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
-    const resp = await model.generateContent(prompt);
-    const md = resp?.response?.text?.() || '';
-    if (!md) return res.status(500).json({ error: 'Empty response from model' });
-    // Save journey for the user (title/prompt/itinerary)
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ message: 'Unauthorized' });
+    const { prompt } = req.body || {};
+    if (!prompt) return res.status(400).json({ message: 'Prompt is required.' });
+
+    const userDocRef = admin.firestore().collection('users').doc(uid);
+    const userSnap = await userDocRef.get();
+    if (!userSnap.exists) return res.status(404).json({ message: 'User profile not found.' });
+    const userData = userSnap.data();
+
+    const finalPrompt = createJsonPrompt(userData, prompt);
+    const raw = await getGeminiResponse(finalPrompt);
+
+    // Parse strict JSON, stripping optional fences
+    let jsonResponse;
     try {
-      const now = new Date();
-      const journey = {
-        prompt: userQuery,
-        title: (userQuery || 'Journey'),
-        createdAt: admin.firestore.Timestamp.fromDate(now),
-        format: 'markdown',
-        size: md.length,
-      };
-      await admin.firestore().collection('users').doc(uid).collection('journeys').add(journey);
-    } catch (e) {
-      console.warn('Failed to log journey', e?.message);
+      const cleaned = (raw || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+      jsonResponse = JSON.parse(cleaned);
+    } catch (err) {
+      console.error('Failed to parse Gemini response as JSON:', err);
+      console.error('Raw Response was:', raw);
+      return res.status(500).json({ message: 'The AI returned an invalid format. Please try again.' });
     }
-    return res.json({ itinerary: md });
-  } catch (e) {
-    console.error('DNA route error', e);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    if (!jsonResponse || !Array.isArray(jsonResponse.itinerary)) {
+      return res.status(500).json({ message: 'The AI returned a malformed itinerary. Please try again.' });
+    }
+
+    // Log lightweight journey metadata
+    try {
+      await userDocRef.collection('journeys').add({
+        prompt,
+        title: `Trip to ${String(prompt).slice(0, 30)}...`,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        format: 'json',
+      });
+    } catch (e) {
+      console.warn('Failed to log journey', e?.message || e);
+    }
+
+    res.status(200).json(jsonResponse);
+  } catch (error) {
+    console.error('Error in /generate-itinerary endpoint:', error);
+    res.status(500).json({ message: 'An internal server error occurred.' });
   }
 });
 

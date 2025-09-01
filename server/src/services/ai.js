@@ -167,6 +167,11 @@ async function callGemini({ prompt }) {
   return text || '';
 }
 
+// Public: return raw text from Gemini for a given prompt
+export async function getGeminiResponse(prompt) {
+  return callGemini({ prompt });
+}
+
 function tryParseJson(text) {
   try {
     const cleaned = text.trim().replace(/^```(json)?/i, '').replace(/```$/i, '').trim();

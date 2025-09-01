@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { mustBeAuthed } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
 import { generateSuggestion } from '../services/ai.js';
 
 const router = Router();
-router.use(mustBeAuthed);
+router.use(authMiddleware);
 
 // POST /api/suggest  { destinations: ["Germany","France"] }
 router.post('/', async (req, res) => {

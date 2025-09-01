@@ -10,7 +10,6 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.45.0",
   "firebase": "^10.14.1",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.542.0",

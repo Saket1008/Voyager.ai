@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
 import HomeClient from './app/HomeClient';
 import Auth from './components/Auth';
 import Onboarding from './components/Onboarding';
 import Chatbox from './components/Chatbox';
+import EditProfile from './components/EditProfile';
 import { auth, db, isFirebaseReady } from './lib/firebaseClient';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -12,6 +12,7 @@ export default function App() {
   const [fbUser, setFbUser] = useState(null);
   const [loading, setLoading] = useState(isFirebaseReady);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
 
   useEffect(() => {
     if (!isFirebaseReady || !auth) { setLoading(false); return; }
@@ -34,22 +35,17 @@ export default function App() {
   if (isFirebaseReady) {
     if (!fbUser) return <Auth />;
     if (needsOnboarding) return <div className="min-h-screen p-4"><Onboarding onDone={() => setNeedsOnboarding(false)} /></div>;
-    return <div className="min-h-screen"><Chatbox /></div>;
+    return (
+      <div className="min-h-screen">
+        <Chatbox user={fbUser} onEditProfile={() => setIsEditingProfile(true)} />
+        {isEditingProfile && <EditProfile onClose={() => setIsEditingProfile(false)} />}
+      </div>
+    );
   }
 
   // Fallback to the existing splash+chat experience if Firebase isn’t configured
   return (
     <div className="min-h-screen">
-      <div className="absolute top-4 right-4 z-10">
-        <SignedOut>
-          <SignInButton mode="modal">
-            <button className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700">Sign in</button>
-          </SignInButton>
-        </SignedOut>
-        <SignedIn>
-          <UserButton afterSignOutUrl="/" />
-        </SignedIn>
-      </div>
       <HomeClient />
     </div>
   );

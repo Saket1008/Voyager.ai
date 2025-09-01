@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { mustBeAuthed } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
 import { generateItinerary, generateItineraryMarkdown } from '../services/ai.js';
 
 const router = Router();
-router.use(mustBeAuthed);
+router.use(authMiddleware);
 
 // POST /api/itinerary  { ...full payload from wizard }
 router.post('/', async (req, res) => {
