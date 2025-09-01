@@ -3,6 +3,17 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfi
 import { auth } from '../lib/firebaseClient';
 
 export default function AuthPage() {
+  if (!auth) {
+    return (
+      <div className="min-h-screen grid place-items-center text-white">
+        <div className="w-full max-w-sm rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-md">
+          <div className="mb-3 text-center text-lg font-semibold">Authentication unavailable</div>
+          <div className="text-sm text-red-400">Firebase client not initialized. Make sure VITE_FIREBASE_* keys are present in `frontend/.env` and restart the dev server.</div>
+        </div>
+      </div>
+    );
+  }
+
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

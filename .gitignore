@@ -122,3 +122,4 @@ lerna-debug.log*
 
 # Config directories
 .config/
+server/serviceAccountKey.json

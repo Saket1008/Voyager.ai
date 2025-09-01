@@ -1,70 +1,70 @@
-import React, { useEffect, useState } from 'react';
-import HomeClient from './app/HomeClient';
-import Onboarding from './components/Onboarding';
-import OnboardingPage from './pages/OnboardingPage';
-import Chatbox from './components/Chatbox';
-import EditProfile from './components/EditProfile';
+import React from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import AuthPage from './pages/AuthPage';
-import { auth, db, isFirebaseReady } from './lib/firebaseClient';
-import { onAuthStateChanged } from 'firebase/auth';
+import OnboardingPage from './pages/OnboardingPage';
+import HomeClient from './app/HomeClient.jsx';
+import SimpleLoader from './components/Loader.jsx';
 import { doc, getDoc } from 'firebase/firestore';
-import { AuthProvider } from './context/AuthContext';
+import { db } from './lib/firebaseClient';
 
-export default function App() {
-  const [fbUser, setFbUser] = useState(null);
-  const [loading, setLoading] = useState(isFirebaseReady);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
+function AppContent() {
+  const { currentUser, loading } = useAuth();
+  const [needsOnboarding, setNeedsOnboarding] = React.useState(true);
+  const [checkingOnboarding, setCheckingOnboarding] = React.useState(true);
 
-  useEffect(() => {
-    if (!isFirebaseReady || !auth) { setLoading(false); return; }
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setFbUser(u);
-      if (u && db) {
-        const snap = await getDoc(doc(db, 'users', u.uid));
-        const data = snap.exists() ? snap.data() : null;
-        const hasProfile = !!(data && data.travelProfile);
-        setNeedsOnboarding(!hasProfile);
-      } else {
-        setNeedsOnboarding(false);
-      }
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  let content = null;
-  if (loading) {
-    content = <div className="grid min-h-screen place-items-center text-white">Loading Voyager AI…</div>;
-  } else if (isFirebaseReady) {
-    if (!fbUser) {
-      content = <AuthPage />;
-    } else if (needsOnboarding) {
-      content = <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>;
+  React.useEffect(() => {
+    let mounted = true;
+    if (currentUser) {
+      const checkProfile = async () => {
+        try {
+          if (!db) { if (mounted) { setNeedsOnboarding(true); setCheckingOnboarding(false); } return; }
+          const snap = await getDoc(doc(db, 'users', currentUser.uid));
+          const data = snap.exists() ? snap.data() : null;
+          const profileExists = !!(data && data.travelProfile);
+          if (mounted) { setNeedsOnboarding(!profileExists); setCheckingOnboarding(false); }
+        } catch (e) {
+          console.error('Error checking profile', e);
+          if (mounted) { setNeedsOnboarding(true); setCheckingOnboarding(false); }
+        }
+      };
+      checkProfile();
     } else {
-      content = (
-        <div className="min-h-screen">
-          <Chatbox user={fbUser} onEditProfile={() => setIsEditingProfile(true)} />
-          {isEditingProfile && <EditProfile onClose={() => setIsEditingProfile(false)} />}
-        </div>
-      );
+      setCheckingOnboarding(false);
     }
-  } else {
-    // Fallback to the existing splash+chat experience if Firebase isn’t configured
-    content = (
-      <div className="min-h-screen">
-        <HomeClient />
-      </div>
-    );
-  }
+    return () => { mounted = false; };
+  }, [currentUser]);
+
+  if (loading || checkingOnboarding) return <FullPageLoader />;
 
   return (
+    <div className="min-h-screen bg-black">
+      <Header />
+      <main className="pt-16">
+        {!currentUser ? (
+          <AuthPage />
+        ) : needsOnboarding ? (
+          <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
+        ) : (
+          <HomeClient />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function FullPageLoader() {
+  return (
+    <div className="min-h-screen grid place-items-center">
+      <SimpleLoader />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
     <AuthProvider>
-      <div className="min-h-screen">
-        <Header />
-        {content}
-      </div>
+      <AppContent />
     </AuthProvider>
   );
 }

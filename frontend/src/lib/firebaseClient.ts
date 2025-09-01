@@ -18,8 +18,22 @@ let app = null as any;
 if (hasConfig) {
   app = getApps()[0] || initializeApp(cfgFromEnv as any);
 }
-
 export const isFirebaseReady = !!app;
+// Informative logging so developers can see in the browser console whether the
+// firebase client detected VITE_FIREBASE_* env vars. Use info/warn so it's
+// visible even when "Verbose" console level isn't enabled.
+try {
+  // eslint-disable-next-line no-console
+  if (hasConfig && isFirebaseReady) {
+    console.info('[firebaseClient] Firebase config detected and initialized');
+  } else if (hasConfig && !isFirebaseReady) {
+    console.warn('[firebaseClient] Firebase config present but initialization failed');
+    console.info('[firebaseClient] cfgFromEnv =', cfgFromEnv);
+  } else {
+    console.warn('[firebaseClient] No Firebase config found (VITE_FIREBASE_* missing).');
+    console.info('[firebaseClient] cfgFromEnv =', cfgFromEnv);
+  }
+} catch (e) { /* ignore in non-browser envs */ }
 export const auth = isFirebaseReady ? getAuth(app) : (null as any);
 export const db = isFirebaseReady ? getFirestore(app) : (null as any);
 

@@ -49,7 +49,9 @@ export default function OnboardingPage({ onDone }) {
     setSaving(true);
     try {
       const ref = doc(db, 'users', currentUser.uid);
-      await setDoc(ref, { travelProfile: answers }, { merge: true });
+  // Persist Traveler's DNA and ensure app-wide vegetarian default is recorded
+  const payload = { ...answers, diet: 'vegetarian' };
+  await setDoc(ref, { travelProfile: payload }, { merge: true });
       onDone?.();
     } catch (e) {
       console.error('Failed saving onboarding profile', e);

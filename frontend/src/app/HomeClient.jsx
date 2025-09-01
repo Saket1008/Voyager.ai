@@ -8,13 +8,13 @@ import ChatboxStage from '../components/ChatboxStage.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient() {
-  const [currentView, setCurrentView] = useState<'loading' | 'main' | 'final'>('loading')
+  const [currentView, setCurrentView] = useState('loading')
   const [showTitle, setShowTitle] = useState(false)
   const [showButton, setShowButton] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const [showWormhole, setShowWormhole] = useState(false)
-  const titleRef = useRef<HTMLHeadingElement | null>(null)
-  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const titleRef = useRef(null)
+  const buttonRef = useRef(null)
 
   const handleStartJourney = () => {
     setIsAnimating(true)
@@ -71,5 +71,3 @@ export default function HomeClient() {
     </>
   )
 }
-
-

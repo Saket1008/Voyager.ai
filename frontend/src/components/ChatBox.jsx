@@ -6,6 +6,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { DNA_QUESTIONS } from '../lib/dnaQuestions';
 import ReactMarkdown from 'react-markdown';
 import { Settings, Send, Bot, User, CornerDownLeft, Clock, Utensils, MapPin, Bed, Info, Lightbulb } from 'lucide-react';
+import JourneyHistory from './JourneyHistory';
 
 // Render a JSON itinerary as cards
 const ItineraryCards = ({ items }) => {
@@ -83,7 +84,7 @@ const ChatMessage = ({ message }) => {
 
 // Main Chatbox Component
 const Chatbox = ({ onEditProfile, user }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, idToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -125,152 +126,124 @@ const Chatbox = ({ onEditProfile, user }) => {
     return () => { ignore = true; };
   }, [currentUser]);
 
-  // Build dynamic chat flow: core trip questions + skipped DNA
-  const coreTripQuestions = useMemo(() => [
-    { key: 'destination', title: 'Where would you like to go?' },
-    { key: 'dates', title: 'When are you planning to travel?' },
-  ], []);
+  // New Itinerary staged flow (per-journey)
+  const STAGES = [
+    'greeting',
+    'ask_intent',
+    'input_locations',
+    'input_region',
+    'ask_duration',
+    'ask_dates',
+    'ask_travelers',
+    'must_haves',
+    'must_nots',
+    'generate_suggestions',
+  ];
 
-  const chatFlow = useMemo(() => {
-    const dnaQs = skippedQuestions.map(q => ({ key: q.key, title: q.title, options: q.options, fromDNA: true, isMultiSelect: q.isMultiSelect, maxSelections: q.maxSelections }));
-    return [...coreTripQuestions, ...dnaQs];
-  }, [coreTripQuestions, skippedQuestions]);
+  const [stageIndex, setStageIndex] = useState(0);
+  const stage = STAGES[stageIndex];
+  const [trip, setTrip] = useState({
+    intent: null,
+    destinations: [],
+    region: null,
+    durationDays: null,
+    dateStart: null,
+    dateFlex: 'none',
+    travelers: null,
+    mustHaves: '',
+    mustNots: '',
+  });
 
   useEffect(() => {
-    // Initial welcome plus first dynamic question
-    const first = chatFlow[0];
-    const welcome = `Welcome, ${user?.displayName || 'Traveler'}!`;
-    const qLine = first ? ` ${first.title}` : " Where would you like to go first?";
-    setMessages([{ role: 'assistant', content: `${welcome}${qLine}` }]);
-    setFlowIndex(0);
-    setTripAnswers({});
-  setCurrentSelections([]);
-  }, [user, chatFlow.length]);
+    // Initial greeting message
+    const who = currentUser?.displayName || user?.displayName || 'Traveler';
+    const welcome = `Welcome, ${who}!`;
+    setMessages([{ role: 'assistant', content: `${welcome} Ready to plan a new trip?` }]);
+    setStageIndex(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, user]);
 
-  useEffect(() => {
-    // Auto-scroll to the latest message
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, stageIndex]);
 
-  async function updateProfileInBackground(dataToSave) {
-    try {
-      if (!dataToSave || typeof dataToSave !== 'object' || Object.keys(dataToSave).length === 0) return;
-      if (!currentUser || !db) return;
-      const ref = doc(db, 'users', currentUser.uid);
-      await setDoc(ref, { travelProfile: dataToSave }, { merge: true });
-    } catch (e) {
-      // Silent failure; do not interrupt chat UX
-      console.warn('Background profile update failed', e?.message || e);
-    }
+  function goNext() {
+    setStageIndex((s) => Math.min(STAGES.length - 1, s + 1));
+  }
+  function goBack() {
+    setStageIndex((s) => Math.max(0, s - 1));
   }
 
-  const handleSendMessage = async (textOverride, structuredArray) => {
-    const messageText = (textOverride ?? input).trim();
-    if (!messageText || isLoading) return;
+  function setTripField(key, value) {
+    setTrip((t) => ({ ...t, [key]: value }));
+  }
 
-    const step = chatFlow[flowIndex];
-    const userMessage = { role: 'user', content: messageText };
-    setMessages(prev => [...prev, userMessage]);
+  // Add/remove destination helpers
+  function addDestination(city) {
+    if (!city || !city.trim()) return;
+    setTrip((t) => ({ ...t, destinations: Array.from(new Set([...(t.destinations || []), city.trim()])) }));
+    setInput('');
+    setSuggestions([]);
+  }
+  function removeDestination(city) {
+    setTrip((t) => ({ ...t, destinations: (t.destinations || []).filter((d) => d !== city) }));
+  }
 
-    // Capture structured answer for known steps
-    if (step) {
-      setTripAnswers(prev => ({ ...prev, [step.key]: structuredArray ?? messageText }));
-    }
-
-  if (textOverride === undefined) setInput('');
-
-    // If there is a next question in the flow, ask it; otherwise, generate itinerary
-    const hasNext = flowIndex + 1 < chatFlow.length;
-    if (hasNext) {
-      const nextIndex = flowIndex + 1;
-      const nextQ = chatFlow[nextIndex];
-      setFlowIndex(nextIndex);
-      setMessages(prev => [...prev, { role: 'assistant', content: nextQ.title }]);
-      return;
-    }
-
+  async function handleGenerateItinerary() {
     setIsLoading(true);
     try {
-      const token = await getFirebaseIdToken();
-      if (!token) throw new Error('Authentication token not found.');
-
+  const token = idToken ?? await getFirebaseIdToken();
       const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
-      const masterPromptContext = {
+
+      const payload = {
+        user: currentUser ? { uid: currentUser.uid, displayName: currentUser.displayName || currentUser.email } : null,
         travelProfile: travelProfile || {},
-        trip: tripAnswers,
-  freeform: messageText,
+        trip: {
+          intent: trip.intent,
+          destinations: trip.destinations,
+          region: trip.region,
+          durationDays: trip.durationDays,
+          dateStart: trip.dateStart,
+          dateFlex: trip.dateFlex,
+          travelers: trip.travelers,
+          mustHaves: trip.mustHaves,
+          mustNots: trip.mustNots,
+        },
       };
-      const response = await fetch(`${base}/api/generate-itinerary`, {
+
+      const res = await fetch(`${base}/api/itinerary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ prompt: masterPromptContext }),
+        body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to get a response from the server.');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to generate itinerary');
       }
 
-      const data = await response.json();
-      const content = Array.isArray(data?.itinerary) ? data.itinerary : (data?.itinerary || data);
-      const assistantMessage = Array.isArray(content)
-        ? { role: 'assistant', type: 'itinerary-json', content }
-        : { role: 'assistant', content: typeof content === 'string' ? content : JSON.stringify(content, null, 2) };
-      setMessages(prev => [...prev, assistantMessage]);
+      const data = await res.json();
+      // Render response as assistant message (structured or markdown)
+      const content = data || {};
+      setMessages((prev) => [...prev, { role: 'assistant', content: typeof content === 'string' ? content : JSON.stringify(content, null, 2) }]);
 
-      // Persist newly answered DNA fields (keys that were skipped)
-      try {
-        const skippedKeys = new Set(skippedQuestions.map(q => q.key));
-        const newDnaAnswers = Object.fromEntries(
-          Object.entries(tripAnswers).filter(([k, v]) => skippedKeys.has(k) && (Array.isArray(v) ? v.length > 0 : String(v || '').trim().length > 0))
-        );
-        // Update in background; do not await
-        updateProfileInBackground(newDnaAnswers);
-      } catch {}
-    } catch (error) {
-      console.error('API call failed:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: `Sorry, I ran into a problem: ${error.message}` }]);
+      // Move to final or keep stage
+      setStageIndex(STAGES.indexOf('generate_suggestions'));
+    } catch (e) {
+      console.error('itinerary generation failed', e);
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Failed to generate itinerary: ${e.message}` }]);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const currentQuestion = chatFlow[flowIndex];
-
-  const handleQuickReply = (replyText) => {
-    // Programmatically submit the reply as the user's answer
-    handleSendMessage(replyText);
-  };
-
-  const handleMultiSelect = (option) => {
-    if (!currentQuestion?.isMultiSelect) return;
-    setCurrentSelections((prev) => {
-      const exists = prev.includes(option);
-      if (exists) return prev.filter((o) => o !== option);
-      const max = currentQuestion.maxSelections || 3;
-      if (prev.length >= max) return prev; // ignore extra
-      return [...prev, option];
-    });
-  };
-
-  const handleConfirmSelections = () => {
-    if (!currentQuestion?.isMultiSelect) return;
-    if (!currentSelections || currentSelections.length === 0) return;
-    const joined = currentSelections.join(', ');
-    // Pass structured array so tripAnswers stores list instead of string
-    handleSendMessage(joined, currentSelections);
-    setCurrentSelections([]);
-  };
+  }
 
   // Destination suggestions
   const handleDestinationInputChange = async (val) => {
     setInput(val);
     if (!val || val.trim().length < 3) { setSuggestions([]); return; }
     try {
-      const token = await getFirebaseIdToken();
+  const token = idToken ?? await getFirebaseIdToken();
       const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
       const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(val.trim())}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -284,147 +257,178 @@ const Chatbox = ({ onEditProfile, user }) => {
   };
 
   const handleSelectDestination = (city) => {
-    setSuggestions([]);
-    handleSendMessage(city);
+  setSuggestions([]);
+  addDestination(city);
   };
 
   const handleConfirmDate = () => {
     if (!startDate) return;
     const iso = startDate.toISOString().slice(0, 10); // yyyy-mm-dd
-    handleSendMessage(iso);
+    setTripField('dateStart', iso);
+    goNext();
   };
-    
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      if (stage === 'input_locations') {
+        addDestination(input);
+      }
     }
   };
 
   return (
-    <div className="h-full flex flex-col bg-transparent text-white">
-      {/* Header */}
-      <header className="flex-shrink-0 flex items-center justify-between p-4 border-b border-white/10 backdrop-blur-md bg-black/30">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-             <Bot className="w-5 h-5 text-white"/>
+    <div className="text-white">
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Sidebar */}
+        <aside className="w-72 flex-shrink-0 border-r border-white/10 bg-black/20 backdrop-blur-md">
+          <div className="h-full p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-sm font-semibold text-white/80">My Journeys</div>
+              <button onClick={() => { setMessages([]); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
+            </div>
+            <div className="h-[calc(100%-2rem)] overflow-y-auto">
+              <JourneyHistory />
+            </div>
           </div>
-          <h1 className="text-xl font-bold">Voyager AI</h1>
-        </div>
-        <div className="flex items-center gap-4">
-           <p className="text-sm text-gray-400">Welcome, {user?.displayName || user?.email}</p>
-          <button onClick={onEditProfile} className="text-gray-400 hover:text-white transition-colors">
-            <Settings size={20} />
-          </button>
-        </div>
-      </header>
+        </aside>
 
-      {/* Message List */}
-      <main className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto">
-          {messages.map((msg, index) => (
-            <ChatMessage key={index} message={msg} />
-          ))}
-           {isLoading && (
-            <div className="flex items-start gap-4 my-4">
-              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center animate-pulse">
-                 <Bot className="w-6 h-6 text-white" />
-              </div>
-              <div className="max-w-xl p-4 rounded-2xl bg-gray-800 text-gray-400 rounded-bl-none">
-                Generating your next adventure...
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-      </main>
-
-      {/* Input Area */}
-      <footer className="flex-shrink-0 p-4">
-        {currentQuestion?.options && !currentQuestion.isMultiSelect && (
-          <div className="max-w-4xl mx-auto mb-2 flex flex-wrap gap-2">
-            {currentQuestion.options.map((opt) => (
-              <button
-                key={opt}
-                onClick={() => handleQuickReply(opt)}
-                className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs hover:bg-white/20"
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
-        {currentQuestion?.options && currentQuestion.isMultiSelect && (
-          <div className="max-w-4xl mx-auto mb-2">
-            <div className="flex flex-wrap gap-2">
-              {currentQuestion.options.map((opt) => {
-                const selected = currentSelections.includes(opt);
-                return (
-                  <button
-                    key={opt}
-                    onClick={() => handleMultiSelect(opt)}
-                    className={`rounded-full border px-3 py-1 text-xs ${selected ? 'border-white bg-white text-black' : 'border-white/20 bg-white/10 hover:bg-white/20'}`}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex items-center justify-between text-xs text-white/70">
-              <span>Selected {currentSelections.length}{currentQuestion.maxSelections ? `/${currentQuestion.maxSelections}` : ''}</span>
-              <button
-                onClick={handleConfirmSelections}
-                disabled={currentSelections.length === 0}
-                className="rounded-md border border-white/20 bg-blue-600/80 hover:bg-blue-600 text-white px-3 py-1 disabled:opacity-50"
-              >
-                Confirm Selections
-              </button>
-            </div>
-          </div>
-        )}
-        <div className="max-w-4xl mx-auto p-2 rounded-2xl border border-white/10 backdrop-blur-lg bg-black/30 focus-within:border-blue-500 transition-all">
-          <div className="relative">
-            {currentQuestion?.key === 'dates' ? (
-              <div className="px-2 py-2">
-                <DatePicker selected={startDate} onChange={(date) => setStartDate(date)} inline />
-                <div className="mt-2 flex justify-end">
-                  <button onClick={handleConfirmDate} className="rounded-md border border-white/20 bg-blue-600/80 hover:bg-blue-600 text-white px-3 py-1 text-xs">Confirm Date</button>
+        {/* Main chat area */}
+        <section className="flex-1 flex flex-col">
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="mx-auto max-w-3xl">
+              {messages.map((msg, index) => (
+                <ChatMessage key={index} message={msg} />
+              ))}
+              {isLoading && (
+                <div className="my-4 flex items-start gap-4">
+                  <div className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
+                    <Bot className="h-6 w-6 text-white" />
+                  </div>
+                  <div className="max-w-xl rounded-2xl rounded-bl-none bg-gray-800 p-4 text-gray-400">
+                    Generating your next adventure...
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div>
-                <textarea
-                  value={input}
-                  onChange={(e) => currentQuestion?.key === 'destination' ? handleDestinationInputChange(e.target.value) : setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="e.g., 'A 5-day cultural trip to Kyoto'"
-                  className="w-full bg-transparent text-gray-200 placeholder-gray-500 resize-none outline-none pl-4 pr-16 py-3"
-                  rows={1}
-                />
-                {currentQuestion?.key === 'destination' && suggestions.length > 0 && (
-                  <div className="mx-2 -mt-2 mb-2 rounded-md border border-white/10 bg-black/60 backdrop-blur">
-                    {suggestions.map((s) => (
-                      <button key={s} onClick={() => handleSelectDestination(s)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10">
-                        {s}
-                      </button>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+
+          {/* Composer */}
+          <div className="border-t border-white/10 bg-black/20 p-4 backdrop-blur-md">
+            <div className="mx-auto max-w-3xl">
+              {stage === 'ask_intent' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">Do you have specific places in mind, or just a region?</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setTripField('intent', 'locations'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I have specific places</button>
+                    <button onClick={() => { setTripField('intent', 'region'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I only know a region</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'input_locations' && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-sm font-medium">Add destinations (click suggestion or press Enter)</div>
+                  <div className="flex gap-2">
+                    <input value={input} onChange={(e) => handleDestinationInputChange(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDestination(input); } }} className="flex-1 rounded-md bg-transparent border border-white/10 px-3 py-2" placeholder="Type a city or place" />
+                    <button onClick={() => addDestination(input)} className="rounded-md bg-blue-600 px-3 py-2">Add</button>
+                  </div>
+                  {suggestions.length > 0 && (
+                    <div className="mt-2 rounded-md border border-white/10 bg-black/60">
+                      {suggestions.map((s) => (
+                        <button key={s} onClick={() => addDestination(s)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10">{s}</button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(trip.destinations || []).map((d) => (
+                      <div key={d} className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-1">
+                        <span className="text-xs">{d}</span>
+                        <button onClick={() => removeDestination(d)} className="text-xs text-red-400">✕</button>
+                      </div>
                     ))}
                   </div>
-                )}
-              </div>
-            )}
-            <button
-              onClick={() => handleSendMessage()}
-              disabled={isLoading || (!input.trim() && currentQuestion?.key !== 'dates')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send size={20} />
-            </button>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'input_region' && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-sm font-medium">Which region or area are you interested in?</div>
+                  <input value={trip.region || ''} onChange={(e) => setTripField('region', e.target.value)} className="rounded-md bg-transparent border border-white/10 px-3 py-2" placeholder="e.g., Kyoto region" />
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'ask_duration' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">How many days will the trip be?</div>
+                  <div className="flex items-center gap-3">
+                    <input type="number" min={1} value={trip.durationDays || ''} onChange={(e) => setTripField('durationDays', Number(e.target.value))} className="w-24 rounded-md bg-transparent border border-white/10 px-3 py-2" />
+                    <label className="text-xs text-white/60"><input type="checkbox" checked={trip.dateFlex === 'start'} onChange={(e) => setTripField('dateFlex', e.target.checked ? 'start' : 'none')} /> Flexible start date</label>
+                  </div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'ask_dates' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">Select a start date</div>
+                  <div>
+                    <DatePicker selected={trip.dateStart ? new Date(trip.dateStart) : startDate} onChange={(date) => { setStartDate(date); setTripField('dateStart', date ? date.toISOString().slice(0,10) : null); }} inline />
+                  </div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'ask_travelers' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">Who's traveling?</div>
+                  <div className="flex gap-2">
+                    {['Solo Traveler','A Couple','Family','A Group of Friends'].map((label) => (
+                      <button key={label} onClick={() => { setTripField('travelers', label); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">{label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {stage === 'must_haves' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">Anything you absolutely must see or do?</div>
+                  <textarea value={trip.mustHaves} onChange={(e) => setTripField('mustHaves', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" rows={3} />
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                  </div>
+                </div>
+              )}
+
+              {stage === 'must_nots' && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium">Anything to avoid?</div>
+                  <textarea value={trip.mustNots} onChange={(e) => setTripField('mustNots', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" rows={3} />
+                  <div className="mt-3 flex justify-between">
+                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
+                    <button onClick={handleGenerateItinerary} className="rounded-md bg-green-500 px-3 py-1">Generate Itinerary</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-         <p className="text-xs text-center text-gray-500 mt-2">
-          Press Shift + <CornerDownLeft size={10} className="inline-block"/> for a new line.
-        </p>
-      </footer>
+        </section>
+      </div>
     </div>
   );
 };

@@ -3,19 +3,32 @@ export const DNA_QUESTIONS = [
   {
     key: 'pace',
     title: "What's your ideal trip pace?",
-    options: ['Relaxed', 'Balanced', 'Fast-Paced'],
+    options: ['Relaxed', 'Balanced', 'Action-Packed'],
   },
   {
     key: 'budget',
     title: 'What is your typical budget preference?',
-    options: ['Saver', 'Economical', 'Premium', 'Luxury'],
+    options: ['Budget-Friendly', 'Mid-Range', 'Luxury'],
   },
   {
     key: 'interests',
     title: 'What kind of activities interest you most? (Select up to 3)',
-    options: ['History & Culture', 'Nature & Outdoors', 'Food & Culinary', 'Adventure & Sports', 'Art & Museums', 'Shopping & Nightlife'],
+    options: [
+      'History & Museums',
+      'Food & Local Cuisine',
+      'Adventure & Outdoors',
+      'Art & Culture',
+      'Nightlife & Entertainment',
+      'Shopping',
+      'Relaxation & Wellness',
+    ],
     isMultiSelect: true,
     maxSelections: 3,
+  },
+  {
+    key: 'travelStyle',
+    title: 'What is your preferred travel style?',
+    options: ['Must-see Landmarks', 'Off-the-beaten-path', 'Mix of both'],
   },
   {
     key: 'accommodation',
