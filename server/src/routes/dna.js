@@ -4,12 +4,18 @@ import { getGeminiResponse } from '../services/ai.js';
 
 const router = Router();
 
-// Build the JSON-focused master prompt per the new spec
-function createJsonPrompt(userData, userQuery) {
+// Build the JSON-focused master prompt; supports a string prompt or a structured context
+function createJsonPrompt(userData, userQueryOrContext) {
   const name = userData?.name || 'Traveler';
   const tp = userData?.travelProfile || {};
   const fp = userData?.foodProfile || {};
   const join = (v) => (Array.isArray(v) ? v.join(', ') : (v || 'not specified'));
+  // Normalize context
+  const isObj = userQueryOrContext && typeof userQueryOrContext === 'object';
+  const ctx = isObj ? userQueryOrContext : { freeform: String(userQueryOrContext || '') };
+  const trip = ctx.trip || {};
+  const freeform = ctx.freeform || '';
+
   return `
 **ROLE:** You are a world-class, AI-powered travel expert named "Voyager".
 
@@ -23,8 +29,11 @@ function createJsonPrompt(userData, userQuery) {
 - **Dietary Restrictions:** ${join(fp.dietaryRestrictions)}
 - **Favorite Cuisines:** ${join(fp.favoriteCuisines)}
 
-**USER's CURRENT REQUEST:**
-"${userQuery || ''}"
+**CURRENT TRIP CONTEXT:**
+${Object.keys(trip).length ? Object.entries(trip).map(([k,v]) => `- ${k}: ${Array.isArray(v)?v.join(', '):v}`).join('\n') : '- none provided'}
+
+**USER's CURRENT REQUEST (freeform):**
+"${freeform}"
 
 **JSON OUTPUT REQUIREMENTS (MANDATORY):**
 
@@ -48,15 +57,15 @@ router.post('/', async (req, res) => {
   try {
     const uid = req.user?.uid;
     if (!uid) return res.status(401).json({ message: 'Unauthorized' });
-    const { prompt } = req.body || {};
-    if (!prompt) return res.status(400).json({ message: 'Prompt is required.' });
+  const { prompt } = req.body || {};
+  if (prompt === undefined || prompt === null || prompt === '') return res.status(400).json({ message: 'Prompt is required.' });
 
     const userDocRef = admin.firestore().collection('users').doc(uid);
     const userSnap = await userDocRef.get();
     if (!userSnap.exists) return res.status(404).json({ message: 'User profile not found.' });
     const userData = userSnap.data();
 
-    const finalPrompt = createJsonPrompt(userData, prompt);
+  const finalPrompt = createJsonPrompt(userData, prompt);
     const raw = await getGeminiResponse(finalPrompt);
 
     // Parse strict JSON, stripping optional fences
@@ -75,9 +84,15 @@ router.post('/', async (req, res) => {
 
     // Log lightweight journey metadata
     try {
+      const promptSummary = typeof prompt === 'object'
+        ? (prompt?.trip?.destination || JSON.stringify(prompt).slice(0, 60))
+        : String(prompt).slice(0, 60);
+      const title = typeof prompt === 'object' && prompt?.trip?.destination
+        ? `Trip to ${prompt.trip.destination}`
+        : `Trip: ${promptSummary}`;
       await userDocRef.collection('journeys').add({
-        prompt,
-        title: `Trip to ${String(prompt).slice(0, 30)}...`,
+        prompt: typeof prompt === 'string' ? prompt : promptSummary,
+        title,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         format: 'json',
       });

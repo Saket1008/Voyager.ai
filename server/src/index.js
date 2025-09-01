@@ -14,6 +14,7 @@ const { default: itineraryRouter } = await import('./routes/itinerary.js');
 const { default: suggestRouter } = await import('./routes/suggest.js');
 const { default: chatRouter } = await import('./routes/chat.js');
 const { default: dnaRouter } = await import('./routes/dna.js');
+const { default: destinationsRouter } = await import('./routes/destinations.js');
 const { authMiddleware } = await import('./middleware/auth.js');
 
 const app = express();
@@ -63,6 +64,7 @@ app.use('/api/generate-itinerary', authMiddleware, dnaRouter);
 
 // TODO: Standardize and protect the remaining routes with Firebase auth
 app.use('/api/itinerary', authMiddleware, itineraryRouter);
+app.use('/api/destinations', authMiddleware, destinationsRouter);
 app.use('/api/suggest', authMiddleware, suggestRouter);
 app.use('/api/chat', authMiddleware, chatRouter);
 

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import HomeClient from './app/HomeClient';
-import Auth from './components/Auth';
 import Onboarding from './components/Onboarding';
+import OnboardingPage from './pages/OnboardingPage';
 import Chatbox from './components/Chatbox';
 import EditProfile from './components/EditProfile';
+import Header from './components/Header';
+import AuthPage from './pages/AuthPage';
 import { auth, db, isFirebaseReady } from './lib/firebaseClient';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { AuthProvider } from './context/AuthContext';
 
 export default function App() {
   const [fbUser, setFbUser] = useState(null);
@@ -20,7 +23,9 @@ export default function App() {
       setFbUser(u);
       if (u && db) {
         const snap = await getDoc(doc(db, 'users', u.uid));
-        setNeedsOnboarding(!snap.exists());
+        const data = snap.exists() ? snap.data() : null;
+        const hasProfile = !!(data && data.travelProfile);
+        setNeedsOnboarding(!hasProfile);
       } else {
         setNeedsOnboarding(false);
       }
@@ -29,24 +34,37 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  if (loading) return <div className="grid min-h-screen place-items-center text-white">Loading Voyager AI…</div>;
-
-  // If Firebase is configured, prefer its auth gating; else show the existing experience
-  if (isFirebaseReady) {
-    if (!fbUser) return <Auth />;
-    if (needsOnboarding) return <div className="min-h-screen p-4"><Onboarding onDone={() => setNeedsOnboarding(false)} /></div>;
-    return (
+  let content = null;
+  if (loading) {
+    content = <div className="grid min-h-screen place-items-center text-white">Loading Voyager AI…</div>;
+  } else if (isFirebaseReady) {
+    if (!fbUser) {
+      content = <AuthPage />;
+    } else if (needsOnboarding) {
+      content = <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>;
+    } else {
+      content = (
+        <div className="min-h-screen">
+          <Chatbox user={fbUser} onEditProfile={() => setIsEditingProfile(true)} />
+          {isEditingProfile && <EditProfile onClose={() => setIsEditingProfile(false)} />}
+        </div>
+      );
+    }
+  } else {
+    // Fallback to the existing splash+chat experience if Firebase isn’t configured
+    content = (
       <div className="min-h-screen">
-        <Chatbox user={fbUser} onEditProfile={() => setIsEditingProfile(true)} />
-        {isEditingProfile && <EditProfile onClose={() => setIsEditingProfile(false)} />}
+        <HomeClient />
       </div>
     );
   }
 
-  // Fallback to the existing splash+chat experience if Firebase isn’t configured
   return (
-    <div className="min-h-screen">
-      <HomeClient />
-    </div>
+    <AuthProvider>
+      <div className="min-h-screen">
+        <Header />
+        {content}
+      </div>
+    </AuthProvider>
   );
 }
