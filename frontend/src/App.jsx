@@ -40,8 +40,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-black">
-      <Header onToggleSidebar={() => setIsSidebarOpen((s) => !s)} />
-      <main className="pt-16">
+      <main className="pt-0">
         {!currentUser ? (
           <AuthPage />
         ) : needsOnboarding ? (

@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
-import { DNA_QUESTIONS } from '../lib/dnaQuestions';
+import { auth } from '../lib/firebaseClient';
+import { signOut } from 'firebase/auth';
+import { Search, LogOut, RefreshCw, Copy } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Send } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, MapPin, Bed, Info, Lightbulb, Bot } from 'lucide-react';
 
-// Render itinerary cards (same as Chatbox version)
+// Render itinerary cards
 const ItineraryCards = ({ items }) => {
   const iconFor = (type) => {
     switch ((type || '').toLowerCase()) {
@@ -53,29 +55,64 @@ const ItineraryCards = ({ items }) => {
   );
 };
 
-// Simple message bubble
-const ChatMessage = ({ message }) => {
+const ChatMessage = ({ message, userName }) => {
   const isUser = message.role === 'user';
+  const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white shadow-inner';
+  const userCls = 'ml-auto inline-block rounded-full px-4 py-2 text-sm font-medium text-white bg-gradient-to-br from-blue-500 to-indigo-600';
+
   return (
-    <div className={`flex items-start gap-4 my-4 ${isUser ? 'justify-end' : ''}`}>
-      {!isUser && <Avatar role={message.role} />}
-      <div className={`max-w-xl p-4 rounded-2xl ${isUser ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
+    <div className={`flex items-start gap-4 my-6 ${isUser ? 'justify-end' : ''}`}>
+  {!isUser && <Avatar role={message.role} />}
+      <div>
         {message.type === 'itinerary-json' && Array.isArray(message.content) ? (
-          <ItineraryCards items={message.content} />
+          <div className={assistantCls}>
+            <ItineraryCards items={message.content} />
+          </div>
+        ) : isUser ? (
+          <div className={userCls}>{message.content}</div>
         ) : (
-          <div className="prose prose-invert prose-p:my-0 prose-headings:my-2">
-            <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
+          <div>
+            <div className={assistantCls}>
+              <div className="prose prose-invert prose-p:my-0 prose-headings:my-2 break-words">
+                <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>
-      {isUser && <Avatar role={message.role} />}
+  {isUser && <Avatar role={message.role} name={userName} />}
     </div>
   );
 };
 
 export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
   const { currentUser } = useAuth();
+  const fullNameOrEmail = currentUser?.displayName || currentUser?.email || '';
+  const shortName = (() => {
+    try {
+      const raw = (currentUser?.displayName || '').trim();
+      const parts = raw ? raw.split(/\s+/).filter(Boolean) : [];
+      if (parts.length >= 2) return `${parts[0]} ${parts[parts.length - 1]}`; // first + last
+      if (parts.length === 1) return parts[0];
+      // fallback to email prefix
+      const e = (currentUser?.email || '').split('@')[0];
+      return e || 'Guest';
+    } catch (e) {
+      return (currentUser?.email || 'Guest').split('@')[0];
+    }
+  })();
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [chats, setChats] = useState(() => [{ id: 'default', title: 'New chat', messages: [] }]);
+  const searchRef = useRef(null);
   const [activeId, setActiveId] = useState('default');
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId), [chats, activeId]);
   const [input, setInput] = useState('');
@@ -87,21 +124,25 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const endRef = useRef(null);
 
   useEffect(() => {
-    // auto-scroll
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages.length, isTyping]);
 
   const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
 
   const pushMessage = (chatId, role, content) => {
-    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, messages: [...c.messages, { role, content }] } : c));
+    const extras = {};
+    if (content && typeof content === 'object' && ('text' in content || 'content' in content) && !Array.isArray(content)) {
+      const text = content.content || content.text || '';
+      setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, messages: [...c.messages, { role, content: text, ...content }] } : c));
+      return;
+    }
+    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, messages: [...c.messages, { role, content, ...extras }] } : c));
   };
 
   async function sendMessage(text = '', stageOverride = undefined) {
     const chatId = activeId;
     const msg = (text || input).trim();
-    if (!msg && !text) return;
-    // append user message
+    if (!msg && !stageOverride) return;
     pushMessage(chatId, 'user', msg);
     setInput('');
     setIsTyping(true);
@@ -125,17 +166,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       });
       const data = await res.json();
 
-      // server returns { reply, stageNext, input, quickOptions }
       const reply = data?.reply || data?.message || '...';
-      pushMessage(chatId, 'assistant', reply);
+      const assistantMsg = { content: reply };
+      if (Array.isArray(data?.suggestions) && data.suggestions.length) assistantMsg.suggestions = data.suggestions;
+      pushMessage(chatId, 'assistant', assistantMsg);
 
-      // update stage & inputSpec
       if (data?.stageNext) setStage(data.stageNext);
       if (data?.input) setInputSpec(data.input);
       if (Array.isArray(data?.quickOptions)) setQuickOptions(data.quickOptions);
-
-      // update state if server returned an updated state
       if (data?.state) setFlowState(data.state);
+      return data;
     } catch (err) {
       console.error('chat send error', err);
       pushMessage(chatId, 'assistant', `Sorry — I couldn't reach the server: ${String(err?.message || err)}`);
@@ -144,26 +184,22 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     }
   }
 
-  // start greeting when first mounted
   useEffect(() => {
-    if (activeChat?.messages?.length === 0) {
-      // trigger greeting from server without user message
-      sendMessage('', 'greeting');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      if (activeChat?.messages?.length === 0) {
+        const g = await sendMessage('', 'greeting');
+        if (g?.stageNext === 'ask_intent') {
+          await sendMessage('', 'ask_intent');
+        }
+      }
+    })();
+    return () => { mounted = false; };
   }, [activeId]);
 
-  const handleQuick = (opt) => {
-    // if input type expects options, send directly
-    sendMessage(opt);
-  };
-
-  const handleKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
+  const handleQuick = (opt) => sendMessage(opt);
+  const handleKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 
   const newChat = () => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -176,80 +212,143 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     setInputSpec({ type: 'freeText' });
   };
 
+  // Load saved chats & search from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('voyager_chats');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) setChats(parsed);
+      }
+      const s = localStorage.getItem('voyager_search');
+      if (s) setSearch(s);
+    } catch (e) {
+      console.warn('Failed to load local state', e);
+    }
+  }, []);
+
+  // Persist chats and search to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('voyager_chats', JSON.stringify(chats)); } catch (e) { /* ignore */ }
+  }, [chats]);
+  useEffect(() => { try { localStorage.setItem('voyager_search', search); } catch (e) {} }, [search]);
+
+  // Keyboard shortcut: Ctrl/Cmd+K to focus search
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
-    <div className="text-white">
-      <div className="relative h-[calc(100vh-4rem)]">
-        {/* Slide-out JourneyHistory */}
-        <AnimatePresence>
-          {isSidebarOpen && (
-            <>
-              <motion.div
-                initial={{ x: '-100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '-100%' }}
-                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                className="absolute left-0 top-0 bottom-0 w-72 z-40 border-r border-white/10 bg-black/20 backdrop-blur-md"
-              >
-                <div className="h-full p-3">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-white/80">My Journeys</div>
-                    <button onClick={newChat} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
-                  </div>
-                  <div className="h-[calc(100%-2rem)] overflow-y-auto">
-                    <div className="p-2 text-sm text-white/60">Loading…</div>
-                  </div>
-                </div>
-              </motion.div>
+    <div className="relative h-screen w-full text-white bg-transparent">
+      <div className="flex min-h-0">
+        {/* Sidebar: full-height column */}
+        <aside className={`w-80 border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl p-6 flex flex-col items-center min-h-0`} style={{ height: '100vh' }}>
+          {/* Centered logo block */}
+          <div className="flex flex-col items-center mb-4">
+            <div className="h-20 w-20 flex items-center justify-center rounded-2xl bg-white/3 p-3">
+              <img src="/logo.png" alt="Voyager" className="h-full w-full object-contain" />
+            </div>
+            <div className="mt-3 text-2xl font-semibold tracking-tight">Voyager.ai</div>
+            <div className="mt-1 text-sm text-white/70">Welcome, {(currentUser?.displayName || currentUser?.email || 'Guest').split(' ')[0]}</div>
+          </div>
 
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 0.5 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setIsSidebarOpen(false)}
-                className="absolute inset-0 z-30 bg-black"
-              />
-            </>
-          )}
-        </AnimatePresence>
+          {/* Search toggle/button */}
+          <div className="w-full mb-4">
+            {!searchOpen ? (
+              <button onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 60); }} className="w-full text-left rounded-lg bg-black/40 px-3 py-2 text-sm text-white/80 hover:bg-black/50">🔎 Search chats</button>
+            ) : (
+              <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
+                <Search className="w-4 h-4 text-white/70" />
+                <input ref={searchRef} placeholder="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent outline-none text-sm text-white/80 w-full" />
+                <button onClick={() => { setSearch(''); setSearchOpen(false); }} className="text-white/60">✕</button>
+              </div>
+            )}
+          </div>
 
-        <section className="absolute inset-0 flex flex-col">
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="mx-auto max-w-3xl">
+          <div className="w-full mb-4">
+            <button onClick={newChat} className="w-full text-left rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] px-4 py-2 text-sm font-semibold text-black shadow-sm">+ New Journey</button>
+          </div>
+
+          <div className="w-full border-t border-white/6 pt-3 mt-2 space-y-2 overflow-y-auto flex-1 min-h-0">
+            {(() => {
+              const q = search.trim().toLowerCase();
+              const visible = q ? chats.filter((c) => (c.title || '').toLowerCase().includes(q)) : chats;
+              return visible.map((c) => (
+                <div key={c.id} className={`rounded-lg px-3 py-2 text-sm ${c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'}`} onClick={() => setActiveId(c.id)}>{c.title}</div>
+              ));
+            })()}
+          </div>
+
+          {/* Profile / Logout at bottom */}
+          <div className="w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={44} />
+              <div className="text-sm">
+                <div className="font-medium">{shortName}</div>
+                <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
+              </div>
+            </div>
+            <div className="ml-auto">
+              {currentUser ? (
+                <button onClick={() => { try { signOut(auth); } catch (e) { console.error(e); } }} className="rounded-md p-2 bg-white/5 hover:bg-white/10">
+                  <LogOut className="w-4 h-4 text-white" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </aside>
+
+        {/* Main chat area: full-height flex column so input stays at bottom */}
+        <main className="flex-1 overflow-hidden relative flex flex-col min-h-0" style={{ height: '100vh' }}>
+          <div
+            className="flex-1 overflow-y-auto p-8 min-h-0"
+            style={{
+              // very subtle starlight-style highlight: faint radial dots and inset glow
+              backgroundImage: 'radial-gradient(rgba(255,255,255,0.02) 1px, transparent 1px)',
+              backgroundSize: '220px 220px',
+              boxShadow: 'inset 0 0 40px rgba(255,255,255,0.01)'
+            }}
+          >
+            <div className="mx-auto max-w-3xl pt-2">
               {activeChat?.messages?.map((m, i) => (
-                <ChatMessage key={i} message={m} />
+                <div key={i}>
+                  <ChatMessage message={m} userName={fullNameOrEmail} />
+                </div>
               ))}
+
               {isTyping && (
                 <div className="my-4 flex items-start gap-4">
                   <div className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
                     <Bot className="h-6 w-6 text-white" />
                   </div>
-                  <div className="max-w-xl rounded-2xl rounded-bl-none bg-gray-800 p-4 text-gray-400">Thinking…</div>
+                  <div className="w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white">Thinking…</div>
                 </div>
               )}
+
               <div ref={endRef} />
             </div>
           </div>
 
-          <div className="border-t border-white/10 bg-black/20 p-4 backdrop-blur-md">
-            {quickOptions.length > 0 && (
-              <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
-                {quickOptions.map((q) => (
-                  <button key={q} onClick={() => handleQuick(q)} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs hover:bg-white/20">{q}</button>
-                ))}
-              </div>
-            )}
-
-            <div className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-black/30 p-2 backdrop-blur-lg transition-all focus-within:border-blue-500">
-              <div className="relative">
-                <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} minRows={1} maxRows={6} placeholder="Ask me about your trip..." className="w-full resize-none bg-transparent py-3 pl-4 pr-16 text-gray-200 placeholder-gray-500 outline-none" />
-                <button onClick={() => sendMessage()} disabled={isTyping || !input.trim()} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg bg-blue-600 p-2 transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-600">
-                  <Send size={18} />
+          {/* Composer pinned to bottom inside the main column */}
+          <div className="sticky bottom-0 left-0 right-0 flex justify-center pointer-events-none" style={{ paddingBottom: '8px' }}>
+            <div className="pointer-events-auto max-w-3xl w-full px-4">
+              <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
+                <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} minRows={1} maxRows={6} placeholder="Type your message..." className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" />
+                <button onClick={() => sendMessage()} disabled={isTyping || !input.trim()} className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <Send size={16} />
                 </button>
               </div>
+              {/* hint removed per request */}
             </div>
-            <p className="mt-2 text-center text-xs text-gray-500">Press Shift + Enter for a new line.</p>
           </div>
-        </section>
+        </main>
       </div>
     </div>
   );

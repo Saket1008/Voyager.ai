@@ -274,6 +274,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   // Prepare response shape and dynamic hints
   let stageNext = NEXT_STAGE[stage] || null;
   let hints = undefined;
+  let suggestions = undefined;
   // After locations/region are provided, fetch helpful hints (days, best months)
   if ((stage === STAGES.input_locations || stage === STAGES.input_region) && (state?.locations?.length || message)) {
     try {
@@ -296,6 +297,27 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
     const hintDays = hints?.recommended_days ? ` Suggested: ${hints.recommended_days}.` : '';
     text = `Great, noted.${hintDays} How many days do you plan to travel?`;
   }
+
+  // Region-based suggestions for known countries/regions (simple heuristic)
+  try {
+    const regionText = (state?.region || message || '').toString().trim().toLowerCase();
+    if (stage === STAGES.input_region && regionText) {
+      if (/\bindia\b/.test(regionText)) {
+        suggestions = [
+          { label: 'Delhi — historic capital with rich culture', value: 'Delhi' },
+          { label: 'Mumbai — vibrant metropolis and Bollywood hub', value: 'Mumbai' },
+          { label: 'Jaipur — beautiful pink city in Rajasthan', value: 'Jaipur' },
+          { label: 'Goa — tropical beaches and relaxed vibe', value: 'Goa' },
+          { label: 'Bangalore — tech hub with modern attractions', value: 'Bangalore' },
+          { label: 'Kerala — lush landscapes and backwaters', value: 'Kerala' },
+        ];
+        // If we don't already have a reply, craft a helpful prompt
+        if (!text || text.trim().length === 0) {
+          text = 'India is a vast and diverse country with so many amazing destinations! Which cities or regions are you interested in exploring?';
+        }
+      }
+    }
+  } catch (e) {}
 
   // Helper to produce the next prompt succinctly
   function nextPromptFor(next) {
@@ -372,5 +394,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
     }
   }
 
-  return { reply: text, stageNext, quickOptions, input, hints };
+  // Include suggestions when present so frontend can render chips
+  const resp = { reply: text, stageNext, quickOptions, input, hints };
+  if (Array.isArray(suggestions) && suggestions.length) resp.suggestions = suggestions;
+  return resp;
 }
