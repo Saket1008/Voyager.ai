@@ -1,12 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-dotenv.config({ path: resolve(__dirname, '../../.env') });
 
-// GEMINI API key must be provided via env. Do not embed keys in source.
+// GEMINI API key must be provided via environment (loaded in server entrypoint).
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
 if (!GEMINI_KEY) {
@@ -170,6 +164,10 @@ async function callGemini({ prompt }) {
 
 // Public: return raw text from Gemini for a given prompt
 export async function getGeminiResponse(prompt) {
+  if (!genAI) {
+    console.warn('[VoyagerAI] getGeminiResponse: Gemini not configured — returning fallback response.');
+    return 'Gemini not configured. This is a fallback response used during local development.';
+  }
   return callGemini({ prompt });
 }
 
@@ -184,6 +182,16 @@ function tryParseJson(text) {
 
 // ------------------ Public API ------------------
 export async function generateSuggestion({ destinations }) {
+  // Local fallback when Gemini is not configured (keeps dev server usable)
+  if (!genAI) {
+    console.warn('[VoyagerAI] generateSuggestion: Gemini not configured — returning heuristic fallback.');
+    const days = Math.min(14, Math.max(1, Math.ceil((destinations || []).length * 2)));
+    return {
+      recommended_days: `${days}-${days + 2}`,
+      best_months: 'April–June',
+      estimated_budget: '₹1.0L – ₹1.5L for 2 adults',
+    };
+  }
   const prompt = PROMPTS.suggestion({ destinations });
   const text = await callGemini({ prompt });
   const json = tryParseJson(text);
@@ -192,6 +200,23 @@ export async function generateSuggestion({ destinations }) {
 }
 
 export async function generateItinerary(payload) {
+  if (!genAI) {
+    console.warn('[VoyagerAI] generateItinerary: Gemini not configured — returning simple fallback itinerary.');
+    // Minimal fallback itinerary JSON to keep callers robust during dev
+    return {
+      summary: {
+        recommended_days: '3-5',
+        best_months: 'April–June',
+        estimated_budget: '₹0.6L – ₹1.2L for 2 adults',
+        key_tips: ['Fallback itinerary: Gemini not configured'],
+      },
+      flights: [],
+      hotels: [],
+      daily_plan: [],
+      transport: [],
+      notes: ['Detailed itinerary generation requires GEMINI_API_KEY.'],
+    };
+  }
   const prompt = PROMPTS.itinerary(payload);
   const text = await callGemini({ prompt });
   const json = tryParseJson(text);
@@ -200,6 +225,17 @@ export async function generateItinerary(payload) {
 }
 
 export async function generateItineraryMarkdown({ user = null, state = {} }) {
+  // If Gemini is not available, return a concise but useful fallback markdown itinerary
+  if (!genAI) {
+    console.warn('[VoyagerAI] generateItineraryMarkdown: Gemini not configured — returning markdown fallback.');
+    const parts = [];
+    if (Array.isArray(state.locations) && state.locations.length) parts.push(`Destinations: ${state.locations.join(', ')}`);
+    if (state.region) parts.push(`Region: ${state.region}`);
+    if (state.durationDays) parts.push(`Duration: ${state.durationDays} days`);
+    const title = `# Your Quick Itinerary${parts.length ? ' — ' + parts.join(' · ') : ''}`;
+    const body = `\n\nThis is a fallback itinerary generated locally because the Gemini API key is not configured. For a richer, day-by-day plan, set GEMINI_API_KEY in your server environment.\n\n- Overview: A short suggested trip based on provided inputs.\n- Suggestion: Keep flexible.\n\n### Practical Notes\n- Gemini not configured — replace with real itinerary when available.\n`;
+    return `${title}\n${body}`;
+  }
   const prompt = markdownItineraryPrompt({ user, state });
   const text = await callGemini({ prompt });
   // Return raw Markdown text; if model returned fenced code, strip once

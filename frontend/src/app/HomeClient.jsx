@@ -7,7 +7,7 @@ import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
 import '../styles/globals.css'
 
-export default function HomeClient() {
+export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
   const [currentView, setCurrentView] = useState('loading')
   const [showTitle, setShowTitle] = useState(false)
   const [showButton, setShowButton] = useState(false)
@@ -26,6 +26,7 @@ export default function HomeClient() {
     setCurrentView('main')
     setTimeout(() => { setShowTitle(true); setTimeout(() => setShowButton(true), 800) }, 500)
   }
+
 
   return (
     <>
@@ -54,7 +55,7 @@ export default function HomeClient() {
       {/* Final Chat */}
       {currentView === 'final' && (
         <motion.div className="fixed inset-0 z-20" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.2, ease: 'easeOut' }}>
-          <ChatboxStage />
+          <ChatboxStage isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
         </motion.div>
       )}
 

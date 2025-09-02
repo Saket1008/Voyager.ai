@@ -1,31 +1,25 @@
 import { Router } from 'express';
-import { generateSuggestion, generateItinerary, generateChat, STAGES } from '../services/ai.js';
+import { mustBeAuthed } from '../middleware/auth.js';
+import { generateChat, STAGES } from '../services/ai.js';
 
 const router = Router();
+// Enforce Firebase auth for chat interactions
+router.use(mustBeAuthed);
 
 // POST /api/chat
-// Body: { mode: 'chat' | 'itinerary' | 'suggest', message?, payload? }
+// Body: { message?, stage, user?, state? }
 router.post('/', async (req, res) => {
   try {
-  const { mode = 'chat', message = '', payload = {}, stage, user, state } = req.body || {};
+    const { message = '', stage, user, state } = req.body || {};
+    const stageSafe = stage || STAGES.greeting;
+    const data = await generateChat({ message, stage: stageSafe, user: user || null, state: state || {} });
 
-    let data;
-    switch (mode) {
-      case 'itinerary':
-        data = await generateItinerary(payload || {});
-        break;
-      case 'suggest':
-        data = await generateSuggestion(payload || {});
-        break;
-      case 'chat':
-      default: {
-        // stage-based chat
-        const stageSafe = stage || STAGES.greeting;
-        data = await generateChat({ message, stage: stageSafe, user: user || null, state: state || payload?.context || {} });
-        break;
-      }
+    // If the assistant reply looks like a full markdown itinerary, return as markdown
+    const replyText = String(data?.reply || '');
+    if (replyText.trim().startsWith('#')) {
+      return res.type('text/markdown').send(replyText);
     }
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     console.error('chat route error', err);
     // Graceful fallback for chat mode so the UI can proceed even if model/env fails
@@ -35,7 +29,7 @@ router.post('/', async (req, res) => {
       input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
       quickOptions: ['I have specific locations', 'I only know a region'],
     };
-    res.status(200).json(fallback);
+    return res.status(200).json(fallback);
   }
 });
 

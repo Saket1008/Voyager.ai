@@ -12,6 +12,7 @@ function AppContent() {
   const { currentUser, loading } = useAuth();
   const [needsOnboarding, setNeedsOnboarding] = React.useState(true);
   const [checkingOnboarding, setCheckingOnboarding] = React.useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
 
   React.useEffect(() => {
     let mounted = true;
@@ -39,14 +40,14 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-black">
-      <Header />
+      <Header onToggleSidebar={() => setIsSidebarOpen((s) => !s)} />
       <main className="pt-16">
         {!currentUser ? (
           <AuthPage />
         ) : needsOnboarding ? (
           <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
         ) : (
-          <HomeClient />
+          <HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
         )}
       </main>
     </div>

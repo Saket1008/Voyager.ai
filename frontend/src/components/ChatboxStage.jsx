@@ -1,36 +1,79 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
 import { DNA_QUESTIONS } from '../lib/dnaQuestions';
 import ReactMarkdown from 'react-markdown';
-import { Send, Bot, User } from 'lucide-react';
+import { Send } from 'lucide-react';
+import TextareaAutosize from 'react-textarea-autosize';
+import Avatar from './Avatar.jsx';
+import { Clock, Utensils, MapPin, Bed, Info, Lightbulb, Bot } from 'lucide-react';
 
-// Simple message bubble
-const ChatMessage = ({ message }) => {
-  const isUser = message.role === 'user';
-  const Icon = isUser ? User : Bot;
+// Render itinerary cards (same as Chatbox version)
+const ItineraryCards = ({ items }) => {
+  const iconFor = (type) => {
+    switch ((type || '').toLowerCase()) {
+      case 'food': return Utensils;
+      case 'activity': return MapPin;
+      case 'lodging': return Bed;
+      case 'info': return Info;
+      case 'tip': return Lightbulb;
+      default: return MapPin;
+    }
+  };
   return (
-    <div className={`flex items-start gap-4 my-4 ${isUser ? 'justify-end' : ''}`}>
-      {!isUser && (
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-      )}
-      <div className={`max-w-xl p-4 rounded-2xl ${isUser ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
-        <div className="prose prose-invert prose-p:my-0 prose-headings:my-2">
-          <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
-        </div>
-      </div>
-      {isUser && (
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center">
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-      )}
+    <div className="space-y-3">
+      {items.map((it, idx) => {
+        const Icon = iconFor(it.type);
+        return (
+          <div key={idx} className="rounded-2xl border border-white/10 bg-black/30 backdrop-blur-md p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 h-8 w-8 rounded-full bg-white/10 grid place-items-center">
+                <Icon className="w-4 h-4 text-white/90" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-white font-medium truncate">{it.title || 'Untitled'}</h4>
+                  {it.time ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-white/80 bg-white/10 rounded-full px-2 py-0.5"><Clock className="w-3 h-3" />{it.time}</span>
+                  ) : null}
+                </div>
+                {it.description ? (
+                  <p className="mt-1 text-sm text-white/80 whitespace-pre-wrap">{it.description}</p>
+                ) : null}
+                {it.type ? (
+                  <div className="mt-2 text-[11px] text-white/60 capitalize">{it.type}</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };
 
-export default function ChatboxStage() {
+// Simple message bubble
+const ChatMessage = ({ message }) => {
+  const isUser = message.role === 'user';
+  return (
+    <div className={`flex items-start gap-4 my-4 ${isUser ? 'justify-end' : ''}`}>
+      {!isUser && <Avatar role={message.role} />}
+      <div className={`max-w-xl p-4 rounded-2xl ${isUser ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
+        {message.type === 'itinerary-json' && Array.isArray(message.content) ? (
+          <ItineraryCards items={message.content} />
+        ) : (
+          <div className="prose prose-invert prose-p:my-0 prose-headings:my-2">
+            <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+      {isUser && <Avatar role={message.role} />}
+    </div>
+  );
+};
+
+export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
   const { currentUser } = useAuth();
   const [chats, setChats] = useState(() => [{ id: 'default', title: 'New chat', messages: [] }]);
   const [activeId, setActiveId] = useState('default');
@@ -135,25 +178,41 @@ export default function ChatboxStage() {
 
   return (
     <div className="text-white">
-      <div className="flex h-[calc(100vh-4rem)]">
-        <aside className="w-72 flex-shrink-0 border-r border-white/10 bg-black/20 backdrop-blur-md">
-          <div className="h-full p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold text-white/80">Chats</div>
-              <button onClick={newChat} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
-            </div>
-            <div className="h-[calc(100%-2rem)] overflow-y-auto">
-              {chats.map((c) => (
-                <div key={c.id} onClick={() => setActiveId(c.id)} className={`cursor-pointer mb-2 p-2 rounded-md ${c.id === activeId ? 'bg-white/5' : 'bg-transparent'} hover:bg-white/5`}>
-                  <div className="text-sm font-medium truncate">{c.title}</div>
-                  <div className="text-xs text-white/50">{c.messages.length ? `${c.messages.length} messages` : 'No messages'}</div>
+      <div className="relative h-[calc(100vh-4rem)]">
+        {/* Slide-out JourneyHistory */}
+        <AnimatePresence>
+          {isSidebarOpen && (
+            <>
+              <motion.div
+                initial={{ x: '-100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '-100%' }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                className="absolute left-0 top-0 bottom-0 w-72 z-40 border-r border-white/10 bg-black/20 backdrop-blur-md"
+              >
+                <div className="h-full p-3">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-white/80">My Journeys</div>
+                    <button onClick={newChat} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
+                  </div>
+                  <div className="h-[calc(100%-2rem)] overflow-y-auto">
+                    <div className="p-2 text-sm text-white/60">Loading…</div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </aside>
+              </motion.div>
 
-        <section className="flex-1 flex flex-col">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.5 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsSidebarOpen(false)}
+                className="absolute inset-0 z-30 bg-black"
+              />
+            </>
+          )}
+        </AnimatePresence>
+
+        <section className="absolute inset-0 flex flex-col">
           <div className="flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-3xl">
               {activeChat?.messages?.map((m, i) => (
@@ -182,7 +241,7 @@ export default function ChatboxStage() {
 
             <div className="mx-auto max-w-3xl rounded-2xl border border-white/10 bg-black/30 p-2 backdrop-blur-lg transition-all focus-within:border-blue-500">
               <div className="relative">
-                <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} placeholder="Ask me about your trip..." className="w-full resize-none bg-transparent py-3 pl-4 pr-16 text-gray-200 placeholder-gray-500 outline-none" rows={1} />
+                <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} minRows={1} maxRows={6} placeholder="Ask me about your trip..." className="w-full resize-none bg-transparent py-3 pl-4 pr-16 text-gray-200 placeholder-gray-500 outline-none" />
                 <button onClick={() => sendMessage()} disabled={isTyping || !input.trim()} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg bg-blue-600 p-2 transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-600">
                   <Send size={18} />
                 </button>

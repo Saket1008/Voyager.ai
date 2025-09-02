@@ -2,8 +2,9 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { auth } from '../lib/firebaseClient';
 import { signOut } from 'firebase/auth';
+import { Menu } from 'lucide-react';
 
-export default function Header() {
+export default function Header({ onToggleSidebar }) {
   const { currentUser, loading } = useAuth();
   if (loading) return null;
 
@@ -11,7 +12,10 @@ export default function Header() {
     <header className="fixed left-0 right-0 top-0 z-50 h-16 border-b border-white/10 bg-black/30 backdrop-blur-lg">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 text-white">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 grid place-items-center text-white/95 text-sm">🛸</div>
+          <button onClick={() => onToggleSidebar && onToggleSidebar()} aria-label="Open journeys" className="rounded-md p-2 bg-white/5 hover:bg-white/10 mr-2">
+            <Menu className="w-5 h-5 text-white" />
+          </button>
+          <img src="/logo.png" alt="Voyager logo" className="h-8 w-8 rounded-full object-cover" />
           <div className="text-lg font-semibold">Voyager AI</div>
         </div>
         {currentUser ? (

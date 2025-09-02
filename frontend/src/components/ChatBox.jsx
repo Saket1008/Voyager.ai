@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import DatePicker from 'react-datepicker';
 import { getFirebaseIdToken, db } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { DNA_QUESTIONS } from '../lib/dnaQuestions';
 import ReactMarkdown from 'react-markdown';
-import { Settings, Send, Bot, User, CornerDownLeft, Clock, Utensils, MapPin, Bed, Info, Lightbulb } from 'lucide-react';
+import { Settings, Send, CornerDownLeft, Clock, Utensils, MapPin, Bed, Info, Lightbulb, Bot } from 'lucide-react';
+import TextareaAutosize from 'react-textarea-autosize';
+import Avatar from './Avatar.jsx';
 import JourneyHistory from './JourneyHistory';
 
 // Render a JSON itinerary as cards
@@ -55,15 +58,10 @@ const ItineraryCards = ({ items }) => {
 // A simple component for individual chat messages
 const ChatMessage = ({ message }) => {
   const isUser = message.role === 'user';
-  const Icon = isUser ? User : Bot;
 
   return (
     <div className={`flex items-start gap-4 my-4 ${isUser ? 'justify-end' : ''}`}>
-      {!isUser && (
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-      )}
+      {!isUser && <Avatar role={message.role} />}
       <div className={`max-w-xl p-4 rounded-2xl ${isUser ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
         {message.type === 'itinerary-json' && Array.isArray(message.content) ? (
           <ItineraryCards items={message.content} />
@@ -73,11 +71,7 @@ const ChatMessage = ({ message }) => {
           </div>
         )}
       </div>
-       {isUser && (
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center">
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-      )}
+      {isUser && <Avatar role={message.role} />}
     </div>
   );
 };
@@ -209,13 +203,30 @@ const Chatbox = ({ onEditProfile, user }) => {
         },
       };
 
-      const res = await fetch(`${base}/api/itinerary`, {
+      // Use the unified chat endpoint and ask it to generate the itinerary for the current staged state
+      const chatPayload = {
+        message: 'Generate itinerary',
+        stage: 'generate_suggestions',
+        user: payload.user,
+        state: {
+          locations: payload.trip.destinations,
+          region: payload.trip.region,
+          durationDays: payload.trip.durationDays,
+          startDate: payload.trip.dateStart,
+          dateFlex: payload.trip.dateFlex,
+          travelers: payload.trip.travelers,
+          must_haves: payload.trip.mustHaves,
+          must_nots: payload.trip.mustNots,
+        },
+      };
+
+      const res = await fetch(`${base}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(chatPayload),
       });
 
       if (!res.ok) {
@@ -223,12 +234,15 @@ const Chatbox = ({ onEditProfile, user }) => {
         throw new Error(err.error || 'Failed to generate itinerary');
       }
 
-      const data = await res.json();
-      // Render response as assistant message (structured or markdown)
-      const content = data || {};
-      setMessages((prev) => [...prev, { role: 'assistant', content: typeof content === 'string' ? content : JSON.stringify(content, null, 2) }]);
+      const contentType = res.headers.get('content-type') || '';
+      let assistantContent = null;
+      if (contentType.includes('text/markdown')) {
+        assistantContent = await res.text();
+      } else {
+        assistantContent = await res.json().catch(() => null);
+      }
 
-      // Move to final or keep stage
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent || 'No response' }]);
       setStageIndex(STAGES.indexOf('generate_suggestions'));
     } catch (e) {
       console.error('itinerary generation failed', e);
@@ -276,24 +290,58 @@ const Chatbox = ({ onEditProfile, user }) => {
     }
   };
 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   return (
     <div className="text-white">
-      <div className="flex h-[calc(100vh-4rem)]">
-        {/* Sidebar */}
-        <aside className="w-72 flex-shrink-0 border-r border-white/10 bg-black/20 backdrop-blur-md">
-          <div className="h-full p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold text-white/80">My Journeys</div>
-              <button onClick={() => { setMessages([]); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
-            </div>
-            <div className="h-[calc(100%-2rem)] overflow-y-auto">
-              <JourneyHistory />
-            </div>
-          </div>
-        </aside>
+      <div className="relative h-[calc(100vh-4rem)]">
+        {/* Slide-out JourneyHistory panel (absolute) */}
+        <AnimatePresence>
+          {isSidebarOpen && (
+            <>
+              <motion.div
+                initial={{ x: '-100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '-100%' }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                className="absolute left-0 top-0 bottom-0 w-72 z-40 border-r border-white/10 bg-black/20 backdrop-blur-md"
+              >
+                <div className="h-full p-3">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-white/80">My Journeys</div>
+                    <button onClick={() => { setMessages([]); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
+                  </div>
+                  <div className="h-[calc(100%-2rem)] overflow-y-auto">
+                    <JourneyHistory />
+                  </div>
+                </div>
+              </motion.div>
+
+              {/* Overlay */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.5 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsSidebarOpen(false)}
+                className="absolute inset-0 z-30 bg-black"
+              />
+            </>
+          )}
+        </AnimatePresence>
 
         {/* Main chat area */}
-        <section className="flex-1 flex flex-col">
+        <section className="absolute inset-0 flex flex-col">
+          {/* Top header for small controls */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 bg-black/20 backdrop-blur-md z-10">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIsSidebarOpen((s) => !s)} className="rounded-md p-2 bg-white/5 hover:bg-white/10">
+                <Settings className="w-4 h-4 text-white" />
+              </button>
+              <div className="text-sm font-semibold">Voyager AI</div>
+            </div>
+            <div className="text-xs text-white/60">{currentUser?.displayName || user?.displayName || 'Guest'}</div>
+          </div>
+
           <div className="flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-3xl">
               {messages.map((msg, index) => (
@@ -407,7 +455,7 @@ const Chatbox = ({ onEditProfile, user }) => {
               {stage === 'must_haves' && (
                 <div className="flex flex-col gap-3">
                   <div className="text-sm font-medium">Anything you absolutely must see or do?</div>
-                  <textarea value={trip.mustHaves} onChange={(e) => setTripField('mustHaves', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" rows={3} />
+                  <TextareaAutosize value={trip.mustHaves} onChange={(e) => setTripField('mustHaves', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" minRows={2} maxRows={6} />
                   <div className="mt-3 flex justify-end gap-2">
                     <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
                     <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
@@ -418,7 +466,7 @@ const Chatbox = ({ onEditProfile, user }) => {
               {stage === 'must_nots' && (
                 <div className="flex flex-col gap-3">
                   <div className="text-sm font-medium">Anything to avoid?</div>
-                  <textarea value={trip.mustNots} onChange={(e) => setTripField('mustNots', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" rows={3} />
+                  <TextareaAutosize value={trip.mustNots} onChange={(e) => setTripField('mustNots', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" minRows={2} maxRows={6} />
                   <div className="mt-3 flex justify-between">
                     <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
                     <button onClick={handleGenerateItinerary} className="rounded-md bg-green-500 px-3 py-1">Generate Itinerary</button>

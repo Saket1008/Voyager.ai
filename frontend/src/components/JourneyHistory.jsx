@@ -7,6 +7,7 @@ export default function JourneyHistory() {
   const [journeys, setJourneys] = useState([]);
   const [loading, setLoading] = useState(isFirebaseReady);
   const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isFirebaseReady || !auth || !db) { setLoading(false); return; }
@@ -33,6 +34,25 @@ export default function JourneyHistory() {
   return (
     <div className="p-2 h-full flex flex-col">
       <div className="text-xs font-semibold text-white/80 mb-2">My Journeys</div>
+      <div className="mb-2 flex gap-2">
+        <button onClick={async () => {
+          if (!auth) return alert('Login required to save journeys');
+          setSaving(true);
+          try {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch((import.meta.env.VITE_API_BASE || 'http://localhost:5000') + '/api/journeys', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ title: 'Saved from UI', prompt: 'Saved via JourneyHistory' }),
+            });
+            if (!res.ok) throw new Error('Save failed');
+            alert('Saved');
+          } catch (e) {
+            console.error('Save journey failed', e);
+            alert('Save failed');
+          } finally { setSaving(false); }
+        }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">{saving ? 'Saving…' : 'Save'}</button>
+      </div>
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {loading && <p className="text-[12px] text-white/60">Loading history...</p>}
         {error && <p className="text-[12px] text-red-400">{error}</p>}
