@@ -246,7 +246,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     return () => { mounted = false; };
   }, [activeId]);
 
-  const handleQuick = (opt) => sendMessage(opt);
+  // When user clicks a quick option, send it and include the current stage so backend can advance correctly
+  const handleQuick = (opt) => sendMessage(opt, stage);
   const handleKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 
   const newChat = () => {

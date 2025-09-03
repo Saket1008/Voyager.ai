@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DatePicker from 'react-datepicker';
 import { getFirebaseIdToken, db } from '../lib/firebaseClient';
@@ -90,6 +90,8 @@ const Chatbox = ({ onEditProfile, user }) => {
   const [startDate, setStartDate] = useState(new Date());
   const [suggestions, setSuggestions] = useState([]);
   const messagesEndRef = useRef(null);
+  const [flowState, setFlowState] = useState({}); // persistent state from backend
+  const [inputSpec, setInputSpec] = useState(null); // backend input instructions
 
   // Fetch user's DNA profile
   useEffect(() => {
@@ -165,6 +167,14 @@ const Chatbox = ({ onEditProfile, user }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, user]);
 
+  // Initial greeting effect: trigger backend 'greeting' when there are no messages
+  useEffect(() => {
+    if (messages.length === 0 && !isLoading && currentUser) {
+      // Trigger the backend 'greeting' stage so the assistant reply is produced server-side.
+      send('', {}, 'greeting');
+    }
+  }, [messages.length, isLoading, currentUser, send]);
+
   // Helper: push a message to messages state but avoid duplicate consecutive messages
   function pushMessage(role, content) {
     setMessages((prev) => {
@@ -175,6 +185,76 @@ const Chatbox = ({ onEditProfile, user }) => {
       return msgs;
     });
   }
+  // Backend call helper (returns parsed JSON or text-wrapped object)
+  async function callBackendChat(payload) {
+    const token = idToken ?? await getFirebaseIdToken();
+    const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+    const res = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || err.message || 'Failed to get chat response');
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return res.json();
+    }
+    // If server returned markdown/plain text, return as { reply: text }
+    const text = await res.text();
+    return { reply: text };
+  }
+
+  // Derive currentChatStage from last assistant message's inputSpec.stage or default to 'greeting'
+  const currentChatStage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
+    ? (messages[messages.length - 1].inputSpec?.stage || 'greeting')
+    : 'greeting';
+
+  // The central 'send' function for all user interactions (backup-adapted)
+  const send = useCallback(async (text, stateDelta = {}, stageOverride = null) => {
+    if (isLoading || (!text && !stageOverride)) return;
+
+    setIsLoading(true);
+
+    const userMessage = text ? { role: 'user', content: text, timestamp: new Date().toISOString() } : null;
+    if (userMessage) setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+
+    try {
+      const payload = {
+        message: text || '',
+        stage: stageOverride || currentChatStage,
+        user: currentUser ? { uid: currentUser.uid, displayName: currentUser.displayName } : null,
+        state: { ...flowState, ...stateDelta },
+      };
+
+      const aiResponse = await callBackendChat(payload);
+
+      // Update flowState and inputSpec from backend
+      setFlowState(aiResponse.state || {});
+      setInputSpec(aiResponse.input || aiResponse.inputSpec || null);
+
+      const aiFullMessage = {
+        role: 'assistant',
+        content: aiResponse.reply || aiResponse.message || aiResponse,
+        timestamp: new Date().toISOString(),
+        inputSpec: aiResponse.input || aiResponse.inputSpec || null,
+        hints: aiResponse.hints,
+      };
+      setMessages((prev) => [...prev, aiFullMessage]);
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Oops! Something went wrong. Please try again.', timestamp: new Date().toISOString() }]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, currentUser, flowState, currentChatStage]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, stageIndex]);
 
@@ -398,8 +478,8 @@ const Chatbox = ({ onEditProfile, user }) => {
                 <div className="flex flex-col gap-3">
                   <div className="text-sm font-medium">Do you have specific places in mind, or just a region?</div>
                   <div className="flex gap-2">
-                    <button onClick={() => { setTripField('intent', 'locations'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I have specific places</button>
-                    <button onClick={() => { setTripField('intent', 'region'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I only know a region</button>
+                    <button onClick={async () => { setTripField('intent', 'locations'); await send('I have specific locations', {}, 'ask_intent'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I have specific places</button>
+                    <button onClick={async () => { setTripField('intent', 'region'); await send('I only know a region', {}, 'ask_intent'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I only know a region</button>
                   </div>
                 </div>
               )}
@@ -495,7 +575,7 @@ const Chatbox = ({ onEditProfile, user }) => {
                   <div className="text-sm font-medium">Who's traveling?</div>
                   <div className="flex gap-2">
                     {['Solo Traveler','A Couple','Family','A Group of Friends'].map((label) => (
-                      <button key={label} onClick={() => { setTripField('travelers', label); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">{label}</button>
+                      <button key={label} onClick={async () => { setTripField('travelers', label); await send(label, {}, 'ask_travelers'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">{label}</button>
                     ))}
                   </div>
                 </div>
