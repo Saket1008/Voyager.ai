@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import { Send } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
+import StageInput from './StageInput.jsx';
 import { Clock, Utensils, MapPin, Bed, Info, Lightbulb, Bot } from 'lucide-react';
 
 // Render itinerary cards
@@ -109,6 +110,13 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       return (currentUser?.email || 'Guest').split('@')[0];
     }
   })();
+  const firstName = (() => {
+    const raw = (currentUser?.displayName || currentUser?.email || '').trim();
+    if (!raw) return '';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length) return parts[0];
+    return raw.split('@')[0] || raw;
+  })();
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [chats, setChats] = useState(() => [{ id: 'default', title: 'New chat', messages: [] }]);
@@ -121,6 +129,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
   const [flowState, setFlowState] = useState({});
+  const greetedRef = useRef(new Set());
+  const lastAssistantStageRef = useRef({});
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -130,20 +140,56 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
 
   const pushMessage = (chatId, role, content) => {
-    const extras = {};
-    if (content && typeof content === 'object' && ('text' in content || 'content' in content) && !Array.isArray(content)) {
-      const text = content.content || content.text || '';
-      setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, messages: [...c.messages, { role, content: text, ...content }] } : c));
-      return;
-    }
-    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, messages: [...c.messages, { role, content, ...extras }] } : c));
+    // Build the normalized message object
+    const makeMsg = (role, content) => {
+      if (content && typeof content === 'object' && ('text' in content || 'content' in content) && !Array.isArray(content)) {
+        const text = content.content || content.text || '';
+        return { role, content: text, ...content };
+      }
+      return { role, content };
+    };
+
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== chatId) return c;
+      const msgs = Array.isArray(c.messages) ? c.messages.slice() : [];
+      const newMsg = makeMsg(role, content);
+      // Avoid pushing duplicate consecutive messages with same role and similar content.
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === newMsg.role) {
+        const normalize = (s) => String(s || '').replace(/\p{Emoji_Presentation}|\p{Emoji}|[\p{P}\p{S}]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+        try {
+          const a = normalize(last.content);
+          const b = normalize(newMsg.content);
+          if (a && b && a === b) return c; // skip if normalized content matches
+        } catch (e) {
+          // fallback simple compare
+          if (String(last.content) === String(newMsg.content)) return c;
+        }
+      }
+      // Avoid adding multiple assistant replies for the same stage: if an assistant message was already recorded for this stage, skip.
+      if (role === 'assistant') {
+        try {
+          const lastStage = lastAssistantStageRef.current[chatId];
+          const currentStage = stage;
+          if (lastStage && currentStage && lastStage === currentStage) {
+            return c; // skip duplicate assistant reply for same stage
+          }
+        } catch (e) {}
+      }
+      msgs.push(newMsg);
+      if (role === 'assistant') {
+        try { lastAssistantStageRef.current[chatId] = stage; } catch (e) {}
+      }
+      return { ...c, messages: msgs };
+    }));
   };
 
   async function sendMessage(text = '', stageOverride = undefined) {
     const chatId = activeId;
     const msg = (text || input).trim();
-    if (!msg && !stageOverride) return;
-    pushMessage(chatId, 'user', msg);
+  if (!msg && !stageOverride) return;
+  // Only push a user message if there is non-empty text (avoid empty placeholders when using stage overrides)
+  if (msg) pushMessage(chatId, 'user', msg);
     setInput('');
     setIsTyping(true);
 
@@ -153,9 +199,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         mode: 'chat',
         message: msg,
         stage: stageOverride || stage,
-        user: currentUser ? { uid: currentUser.uid, displayName: currentUser.displayName || currentUser.email } : null,
+        user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
         state: flowState,
       };
+      // If caller requested a stage override, reflect it in local UI state immediately so subsequent quickOptions are in correct context
+      if (stageOverride) setStage(stageOverride);
       const res = await fetch(`${base}/api/chat`, {
         method: 'POST',
         headers: {
@@ -188,11 +236,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     let mounted = true;
     (async () => {
       if (!mounted) return;
-      if (activeChat?.messages?.length === 0) {
-        const g = await sendMessage('', 'greeting');
-        if (g?.stageNext === 'ask_intent') {
-          await sendMessage('', 'ask_intent');
-        }
+      // Only send the greeting once when a new chat is opened and it has no messages.
+      // Avoid auto-sending the follow-up stage to prevent duplicate assistant phrasing.
+      if (activeChat?.messages?.length === 0 && !greetedRef.current.has(activeId)) {
+        greetedRef.current.add(activeId);
+        await sendMessage('', 'greeting');
       }
     })();
     return () => { mounted = false; };
@@ -336,16 +384,47 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
             </div>
           </div>
 
+          {/* Server-driven stage input */}
+          {/* StageInput was moved into the composer area below so it can replace the text input */}
+
           {/* Composer pinned to bottom inside the main column */}
           <div className="sticky bottom-0 left-0 right-0 flex justify-center pointer-events-none" style={{ paddingBottom: '8px' }}>
             <div className="pointer-events-auto max-w-3xl w-full px-4">
-              <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
-                <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} minRows={1} maxRows={6} placeholder="Type your message..." className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" />
-                <button onClick={() => sendMessage()} disabled={isTyping || !input.trim()} className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <Send size={16} />
-                </button>
-              </div>
-              {/* hint removed per request */}
+              <AnimatePresence mode="wait">
+                {inputSpec && (inputSpec.type === 'options' || inputSpec.type === 'multiselect' || inputSpec.type === 'dates' || inputSpec.type === 'days') ? (
+                  <motion.div key="options-panel" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ duration: 0.18 }}>
+                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
+                      <StageInput
+                        inputSpec={inputSpec}
+                        quickOptions={quickOptions}
+                        flowState={flowState}
+                        setFlowState={(s) => setFlowState(s)}
+                        onSubmit={async (value) => {
+                          let parsed = value;
+                          try { parsed = JSON.parse(value); } catch (e) { parsed = value; }
+                          if (typeof parsed === 'object' && parsed !== null) {
+                            setFlowState((prev) => ({ ...prev, ...parsed }));
+                          }
+                          try {
+                            const data = await sendMessage(typeof value === 'string' ? value : JSON.stringify(value), stage);
+                            const next = data?.stageNext;
+                            if (next) await sendMessage('', next);
+                          } catch (e) { }
+                        }}
+                      />
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="text-input" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ duration: 0.18 }}>
+                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
+                      <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={handleKey} minRows={1} maxRows={6} placeholder="Type your message..." className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" />
+                      <button onClick={() => sendMessage()} disabled={isTyping || !input.trim()} className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">
+                        <Send size={16} />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </main>

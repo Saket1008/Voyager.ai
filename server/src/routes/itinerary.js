@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { generateItinerary, generateItineraryMarkdown } from '../services/ai.js';
+import { ensureFirebaseAdmin } from '../services/firebaseAdmin.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -11,7 +12,15 @@ router.post('/', async (req, res) => {
     const payload = req.body || {};
     const format = (req.query.format || payload.format || 'json').toString();
     if (format === 'markdown') {
-      const md = await generateItineraryMarkdown({ user: payload.user || null, state: payload });
+      let travelProfile = {};
+      try {
+        const adm = ensureFirebaseAdmin();
+        if (adm && payload.user && payload.user.uid) {
+          const doc = await adm.firestore().collection('users').doc(payload.user.uid).get();
+          if (doc.exists) travelProfile = doc.data().travelProfile || {};
+        }
+      } catch (e) { /* ignore */ }
+      const md = await generateItineraryMarkdown({ user: payload.user || null, state: payload, travelProfile });
       res.type('text/markdown').send(md);
     } else {
       if (!payload.destinations || !Array.isArray(payload.destinations)) {

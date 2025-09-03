@@ -152,10 +152,29 @@ const Chatbox = ({ onEditProfile, user }) => {
     // Initial greeting message
     const who = currentUser?.displayName || user?.displayName || 'Traveler';
     const welcome = `Welcome, ${who}!`;
-    setMessages([{ role: 'assistant', content: `${welcome} Ready to plan a new trip?` }]);
+    const greeting = `${welcome} Ready to plan a new trip?`;
+    // avoid duplicating the greeting if already present
+    setMessages((prev) => {
+      if (Array.isArray(prev) && prev.length > 0) {
+        const first = prev[0];
+        if (first && first.role === 'assistant' && String(first.content) === greeting) return prev;
+      }
+      return [{ role: 'assistant', content: greeting }];
+    });
     setStageIndex(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, user]);
+
+  // Helper: push a message to messages state but avoid duplicate consecutive messages
+  function pushMessage(role, content) {
+    setMessages((prev) => {
+      const msgs = Array.isArray(prev) ? prev.slice() : [];
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === role && String(last.content) === String(content)) return msgs;
+      msgs.push({ role, content });
+      return msgs;
+    });
+  }
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, stageIndex]);
 
@@ -242,11 +261,11 @@ const Chatbox = ({ onEditProfile, user }) => {
         assistantContent = await res.json().catch(() => null);
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent || 'No response' }]);
+  pushMessage('assistant', assistantContent || 'No response');
       setStageIndex(STAGES.indexOf('generate_suggestions'));
     } catch (e) {
       console.error('itinerary generation failed', e);
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Failed to generate itinerary: ${e.message}` }]);
+  pushMessage('assistant', `Failed to generate itinerary: ${e.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -275,11 +294,22 @@ const Chatbox = ({ onEditProfile, user }) => {
   addDestination(city);
   };
 
+  // Duration helpers: increment, decrement, and preset setter
+  function incrementDuration() {
+    setTrip((t) => ({ ...t, durationDays: Math.max(1, (Number(t.durationDays) || 0) + 1) }));
+  }
+  function decrementDuration() {
+    setTrip((t) => ({ ...t, durationDays: Math.max(1, (Number(t.durationDays) || 1) - 1) }));
+  }
+  function setDurationPreset(n) {
+    setTripField('durationDays', n);
+  }
+
   const handleConfirmDate = () => {
     if (!startDate) return;
     const iso = startDate.toISOString().slice(0, 10); // yyyy-mm-dd
     setTripField('dateStart', iso);
-    goNext();
+  goNext();
   };
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -309,7 +339,7 @@ const Chatbox = ({ onEditProfile, user }) => {
                 <div className="h-full p-3">
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-sm font-semibold text-white/80">My Journeys</div>
-                    <button onClick={() => { setMessages([]); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
+                    <button onClick={() => { setMessages([]); pushMessage('assistant', `Welcome, ${currentUser?.displayName || user?.displayName || 'Traveler'}! Ready to plan a new trip?`); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
                   </div>
                   <div className="h-[calc(100%-2rem)] overflow-y-auto">
                     <JourneyHistory />
@@ -418,8 +448,27 @@ const Chatbox = ({ onEditProfile, user }) => {
                 <div className="flex flex-col gap-3">
                   <div className="text-sm font-medium">How many days will the trip be?</div>
                   <div className="flex items-center gap-3">
-                    <input type="number" min={1} value={trip.durationDays || ''} onChange={(e) => setTripField('durationDays', Number(e.target.value))} className="w-24 rounded-md bg-transparent border border-white/10 px-3 py-2" />
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={decrementDuration} className="rounded-md border border-white/10 px-3 py-2 bg-white/5">-</button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={trip.durationDays || ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          // keep empty as null so clearing doesn't produce 0
+                          setTripField('durationDays', v === '' ? null : Math.max(1, Number(v)));
+                        }}
+                        className="w-24 rounded-md bg-transparent border border-white/10 px-3 py-2"
+                      />
+                      <button type="button" onClick={incrementDuration} className="rounded-md border border-white/10 px-3 py-2 bg-white/5">+</button>
+                    </div>
                     <label className="text-xs text-white/60"><input type="checkbox" checked={trip.dateFlex === 'start'} onChange={(e) => setTripField('dateFlex', e.target.checked ? 'start' : 'none')} /> Flexible start date</label>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    {[3,5,7].map((n) => (
+                      <button key={n} type="button" onClick={() => setDurationPreset(n)} className="rounded-md border border-white/20 bg-white/10 px-3 py-1 text-sm">{n} days</button>
+                    ))}
                   </div>
                   <div className="mt-3 flex justify-end gap-2">
                     <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
@@ -436,7 +485,7 @@ const Chatbox = ({ onEditProfile, user }) => {
                   </div>
                   <div className="mt-3 flex justify-end gap-2">
                     <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
+                    <button onClick={handleConfirmDate} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
                   </div>
                 </div>
               )}

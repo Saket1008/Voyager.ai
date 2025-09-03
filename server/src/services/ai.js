@@ -1,12 +1,29 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// GEMINI API key must be provided via environment (loaded in server entrypoint).
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
-const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
-if (!GEMINI_KEY) {
-  console.warn('[VoyagerAI] GEMINI_API_KEY is not set. Gemini integrations will be disabled; chat will use built-in fallbacks.');
+// Lazy init for Gemini client so dotenv can be loaded before first use.
+let _genAI = null;
+let _model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+function getGenAI() {
+  if (_genAI) return _genAI;
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    // Avoid spamming logs — warn once
+    if (!getGenAI._warned) {
+      console.warn('[VoyagerAI] GEMINI_API_KEY not found in environment; Gemini features disabled.');
+      getGenAI._warned = true;
+    }
+    return null;
+  }
+  try {
+    _genAI = new GoogleGenerativeAI(key);
+    // refresh model name from env at init time
+    _model = process.env.GEMINI_MODEL || _model;
+    return _genAI;
+  } catch (e) {
+    console.warn('[VoyagerAI] Failed to initialize Gemini client:', e?.message || e);
+    return null;
+  }
 }
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
 // ------------------ Chat flow stages ------------------
 export const STAGES = {
@@ -19,11 +36,7 @@ export const STAGES = {
   ask_dates: 'ask_dates', // start date picker; auto-calc end date based on days; date flexibility radios
   // Traveler profile
   ask_travelers: 'ask_travelers', // solo/couple/family/friends
-  // Vibe & pace
-  ask_pace: 'ask_pace', // relaxed/balanced/action-packed
-  ask_interests: 'ask_interests', // multiselect interests
-  // Practicalities
-  ask_budget: 'ask_budget',
+  // (DNA-related questions removed — captured during onboarding)
   // Final polish
   must_haves: 'must_haves',
   must_nots: 'must_nots',
@@ -36,17 +49,13 @@ export const STAGES = {
 
 const NEXT_STAGE = {
   [STAGES.greeting]: STAGES.ask_intent,
-  [STAGES.ask_intent]: null, // client chooses: input_locations or input_region
+  [STAGES.ask_intent]: null, // Client chooses: input_locations or input_region
   [STAGES.input_locations]: STAGES.ask_duration,
   [STAGES.input_region]: STAGES.ask_duration,
   [STAGES.ask_duration]: STAGES.ask_dates,
   [STAGES.ask_dates]: STAGES.ask_travelers,
-  [STAGES.ask_travelers]: STAGES.ask_pace,
-  [STAGES.ask_pace]: STAGES.ask_interests,
-  [STAGES.ask_interests]: STAGES.ask_budget,
-  [STAGES.ask_budget]: STAGES.must_haves,
-  [STAGES.must_haves]: STAGES.must_nots,
-  [STAGES.must_nots]: STAGES.generate_suggestions,
+  // All DNA questions are removed from the sequence
+  [STAGES.ask_travelers]: STAGES.generate_suggestions,
   [STAGES.generate_suggestions]: STAGES.iterate,
   [STAGES.iterate]: STAGES.iterate,
 };
@@ -60,9 +69,6 @@ const EXPECTED_BEHAVIOR = {
   [STAGES.ask_duration]: 'Briefly ask for the number of days. Keep it one short sentence. If you know a typical duration for the selected places, mention it succinctly as a suggestion.',
   [STAGES.ask_dates]: 'Ask them to pick a start date. Mention that the return date will auto-calculate from the chosen number of days. Keep it short. If seasonality is known, mention the best months very briefly.',
   [STAGES.ask_travelers]: 'Ask who is traveling: Solo, Couple, Family, or Group of Friends. Keep it short.',
-  [STAGES.ask_pace]: 'Ask for preferred pace: Relaxed, Balanced, or Action-Packed. One short sentence.',
-  [STAGES.ask_interests]: 'Ask for main interests with a few examples (History, Food, Adventure, Art, Nightlife, Shopping, Relaxation). Allow choosing multiple. One short sentence.',
-  [STAGES.ask_budget]: 'Ask budget tier simply: Budget-Friendly, Mid-Range, or Luxury.',
   [STAGES.must_haves]: 'Ask for any must-see places or must-do activities. One short encouragement.',
   [STAGES.must_nots]: 'Ask for anything to avoid or constraints (e.g., big crowds, seafood, too much walking).',
   [STAGES.ask_experience]: 'Legacy: short experience question if needed.',
@@ -77,24 +83,30 @@ export const PROMPTS = {
 };
 
 // Master Markdown itinerary prompt
-function markdownItineraryPrompt({ user, state }) {
+function markdownItineraryPrompt({ user, travelProfile = {}, tripState = {} }) {
   const u = user || {};
-  const s = state || {};
+  const dna = travelProfile || {};
+  const trip = tripState || {};
   const parts = [];
-  if (Array.isArray(s.locations) && s.locations.length) parts.push(`Destinations: ${s.locations.join(', ')}`);
-  if (s.region) parts.push(`Region: ${s.region}`);
-  if (s.durationDays) parts.push(`Duration: ${s.durationDays} days${s.durationFlex ? ' (±2 flex)' : ''}`);
-  if (s.startDate && s.endDate) parts.push(`Dates: ${s.startDate} → ${s.endDate}${s.dateFlex && s.dateFlex!=='none' ? ` (flex: ${s.dateFlex})` : ''}`);
-  if (s.travelers) parts.push(`Travelers: ${s.travelers}`);
-  if (s.pace) parts.push(`Pace: ${s.pace}`);
-  if (Array.isArray(s.interests) && s.interests.length) parts.push(`Interests: ${s.interests.join(', ')}`);
-  if (s.budget) parts.push(`Budget: ${s.budget}`);
-  if (s.must_haves) parts.push(`Must-haves: ${s.must_haves}`);
-  if (s.must_nots) parts.push(`Must-nots: ${s.must_nots}`);
+
+  // Trip-specific details
+  if (Array.isArray(trip.locations) && trip.locations.length) parts.push(`Destinations: ${trip.locations.join(', ')}`);
+  if (trip.region) parts.push(`Region: ${trip.region}`);
+  if (trip.durationDays) parts.push(`Duration: ${trip.durationDays} days${trip.durationFlex ? ' (±2 flex)' : ''}`);
+  if (trip.startDate && trip.endDate) parts.push(`Dates: ${trip.startDate} → ${trip.endDate}${trip.dateFlex && trip.dateFlex!=='none' ? ` (flex: ${trip.dateFlex})` : ''}`);
+  if (trip.travelers) parts.push(`Travelers: ${trip.travelers}`);
+
+  // DNA / travel profile
+  parts.push('---');
+  parts.push('Traveler Profile (DNA):');
+  if (dna.pace) parts.push(`- Pace: ${dna.pace}`);
+  if (dna.budget) parts.push(`- Budget: ${dna.budget}`);
+  if (Array.isArray(dna.interests) && dna.interests.length) parts.push(`- Interests: ${dna.interests.join(', ')}`);
+  if (dna.diet) parts.push(`- Dietary Needs: ${dna.diet}`);
 
   const userLine = u.firstName ? `${u.firstName}${u.lastName ? ' ' + u.lastName : ''}` : (u.email || 'Traveler');
 
-  return `Master Prompt for Voyager AI Itinerary Generation\n\nRole: You are a world-class travel expert and an elite itinerary planner named Voyager. Your responses are not just suggestions; they are comprehensive, actionable plans designed to give a traveler a seamless and unforgettable experience. You are meticulous, insightful, and always provide practical, insider-level details.\n\nTask: Create a hyper-detailed, day-by-day travel itinerary based on the following user requirements. The output must be in well-structured Markdown format.\n\nUser Requirements (from chat):\n${parts.map(p=>`- ${p}`).join('\n') || '- User will specify during planning'}\n\nOutput Structure and Content Requirements (Strictly Follow This Format):\n\nMain Title: Start with a title like # Your Hyper-Detailed Itinerary: [Destination(s)].\n\nTrip Overview Section: Create a brief summary section that includes:\n\n- A one-sentence evocative overview of the trip.\n- Travel Dates\n- Focus\n- Pace\n- Budget\n\nPart-by-Part Breakdown:\n\nDivide the itinerary into ### Part X: [City Name], [Country] ([Number of Days]).\n\nUnder each Part heading, add a short, italicized, one-sentence description of the location's essence.\n\nDay-by-Day Plan:\n\nFor each day, use a #### Day X: [Creative Day Theme] ([Date]) heading.\n\nBreak down each day into Morning, Afternoon, and Evening using bolded subheadings.\n\nFor each activity, you MUST include the following types of details:\n\n- Specific Names: Mention specific landmarks, museums, restaurants, cafes, or parks (e.g., "Le Bouillon Chartier," not just "a French restaurant").\n- Logistical Details: Provide practical transportation info. Include specific train/metro lines, station names, approximate journey times, and estimated costs (e.g., "Take the RER B train (approx. €12, ~45 mins journey)...").\n- Actionable Tips & Insider Knowledge: Give crucial advice that enhances the experience. Examples: "You MUST pre-book your timed-entry ticket online weeks in advance," or "Enter via the Carrousel du Louvre entrance to find shorter security lines."\n- Food & Dining: For every suggested restaurant, provide the cuisine type and an estimated budget per person (e.g., "Cuisine: Classic French. Budget: €15-€25 per person.").\n- Alternatives & "Hidden Gems": Where appropriate, suggest an alternative option for a restaurant or activity. Include at least one "Hidden Gem" tip per city to make the itinerary feel special and unique.\n- Contingency Plans: For outdoor-heavy days, include a "Bad Weather Plan B."\n\nTone and Language: Write in a clear, encouraging, and highly informative tone. Use **bolding** to highlight key places and tips.\n\nAt the end, include a short section titled ### Practical Notes (Tickets, Passes, and Money-Savers) with 4–6 bullet points specific to this trip.\n`;
+  return `Master Prompt for Voyager AI Itinerary Generation\n\nRole: You are a world-class travel expert and an elite itinerary planner named Voyager. Your responses are not just suggestions; they are comprehensive, actionable plans designed to give a traveler a seamless and unforgettable experience. You are meticulous, insightful, and always provide practical, insider-level details.\n\nTask: Create a hyper-detailed, day-by-day travel itinerary based on the following user requirements. The output must be in well-structured Markdown format.\n\nUser: ${userLine}\n\nUser Requirements (combined: current trip + saved traveler DNA):\n${parts.map(p=>`- ${p}`).join('\n') || '- User will specify during planning'}\n\nOutput Structure and Content Requirements (Strictly Follow This Format):\n\nMain Title: Start with a title like # Your Hyper-Detailed Itinerary: [Destination(s)].\n\nTrip Overview Section: Create a brief summary section that includes:\n\n- A one-sentence evocative overview of the trip.\n- Travel Dates\n- Focus\n- Pace\n- Budget\n\nPart-by-Part Breakdown:\n\nDivide the itinerary into ### Part X: [City Name], [Country] ([Number of Days]).\n\nUnder each Part heading, add a short, italicized, one-sentence description of the location's essence.\n\nDay-by-Day Plan:\n\nFor each day, use a #### Day X: [Creative Day Theme] ([Date]) heading.\n\nBreak down each day into Morning, Afternoon, and Evening using bolded subheadings.\n\nFor each activity, you MUST include the following types of details:\n\n- Specific Names: Mention specific landmarks, museums, restaurants, cafes, or parks (e.g., "Le Bouillon Chartier," not just "a French restaurant").\n- Logistical Details: Provide practical transportation info. Include specific train/metro lines, station names, approximate journey times, and estimated costs (e.g., "Take the RER B train (approx. €12, ~45 mins journey)...").\n- Actionable Tips & Insider Knowledge: Give crucial advice that enhances the experience. Examples: "You MUST pre-book your timed-entry ticket online weeks in advance," or "Enter via the Carrousel du Louvre entrance to find shorter security lines."\n- Food & Dining: For every suggested restaurant, provide the cuisine type and an estimated budget per person (e.g., "Cuisine: Classic French. Budget: €15-€25 per person.").\n- Alternatives & \"Hidden Gems\": Where appropriate, suggest an alternative option for a restaurant or activity. Include at least one "Hidden Gem" tip per city to make the itinerary feel special and unique.\n- Contingency Plans: For outdoor-heavy days, include a "Bad Weather Plan B."\n\nTone and Language: Write in a clear, encouraging, and highly informative tone. Use **bolding** to highlight key places and tips.\n\nAt the end, include a short section titled ### Practical Notes (Tickets, Passes, and Money-Savers) with 4–6 bullet points specific to this trip.\n`;
 }
 
 const DEFAULT_EXPERIENCE_OPTIONS = [
@@ -155,15 +167,43 @@ function buildStagePrompt({ user, stage, message, state }) {
 
 // ------------------ Helpers ------------------
 async function callGemini({ prompt }) {
+  const genAI = getGenAI();
   if (!genAI) throw new Error('Gemini not configured');
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const resp = await model.generateContent(prompt);
-  const text = resp?.response?.text?.();
-  return text || '';
+  const model = genAI.getGenerativeModel({ model: _model });
+
+  // Retry with exponential backoff for transient server-side errors (503) and rate limits (429).
+  const maxRetries = 4;
+  const baseDelayMs = 800;
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    try {
+      const resp = await model.generateContent(prompt);
+      const text = resp?.response?.text?.();
+      return text || '';
+    } catch (err) {
+      // If the error contains an HTTP status, decide whether to retry.
+      const status = err?.status || err?.code || null;
+      const statusNum = typeof status === 'number' ? status : Number(status);
+      const isTransient = statusNum === 429 || statusNum === 503 || (statusNum >= 500 && statusNum < 600);
+      if (attempt >= maxRetries || !isTransient) {
+        // Re-throw for non-retryable or exhausted retries
+        throw err;
+      }
+
+      // backoff with jitter
+      const jitter = Math.floor(Math.random() * 200);
+      const delay = Math.round(baseDelayMs * Math.pow(2, attempt - 1)) + jitter;
+      console.warn(`[VoyagerAI] Gemini request failed (status=${statusNum || 'unknown'}). Retrying attempt ${attempt}/${maxRetries} after ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
+  }
 }
 
 // Public: return raw text from Gemini for a given prompt
 export async function getGeminiResponse(prompt) {
+  const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] getGeminiResponse: Gemini not configured — returning fallback response.');
     return 'Gemini not configured. This is a fallback response used during local development.';
@@ -183,6 +223,7 @@ function tryParseJson(text) {
 // ------------------ Public API ------------------
 export async function generateSuggestion({ destinations }) {
   // Local fallback when Gemini is not configured (keeps dev server usable)
+  const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] generateSuggestion: Gemini not configured — returning heuristic fallback.');
     const days = Math.min(14, Math.max(1, Math.ceil((destinations || []).length * 2)));
@@ -200,6 +241,7 @@ export async function generateSuggestion({ destinations }) {
 }
 
 export async function generateItinerary(payload) {
+  const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] generateItinerary: Gemini not configured — returning simple fallback itinerary.');
     // Minimal fallback itinerary JSON to keep callers robust during dev
@@ -224,8 +266,9 @@ export async function generateItinerary(payload) {
   return json;
 }
 
-export async function generateItineraryMarkdown({ user = null, state = {} }) {
+export async function generateItineraryMarkdown({ user = null, state = {}, travelProfile = {} }) {
   // If Gemini is not available, return a concise but useful fallback markdown itinerary
+  const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] generateItineraryMarkdown: Gemini not configured — returning markdown fallback.');
     const parts = [];
@@ -236,7 +279,7 @@ export async function generateItineraryMarkdown({ user = null, state = {} }) {
     const body = `\n\nThis is a fallback itinerary generated locally because the Gemini API key is not configured. For a richer, day-by-day plan, set GEMINI_API_KEY in your server environment.\n\n- Overview: A short suggested trip based on provided inputs.\n- Suggestion: Keep flexible.\n\n### Practical Notes\n- Gemini not configured — replace with real itinerary when available.\n`;
     return `${title}\n${body}`;
   }
-  const prompt = markdownItineraryPrompt({ user, state });
+  const prompt = markdownItineraryPrompt({ user, travelProfile, tripState: state });
   const text = await callGemini({ prompt });
   // Return raw Markdown text; if model returned fenced code, strip once
   const cleaned = (text || '').replace(/^```(markdown)?/i, '').replace(/```$/i, '').trim();
@@ -246,6 +289,8 @@ export async function generateItineraryMarkdown({ user = null, state = {} }) {
 
 // Stage-based chat
 export async function generateChat({ stage = STAGES.greeting, message = '', user = null, state = {} }) {
+  // Debug: log incoming chat request
+  try { console.log('[VoyagerAI] generateChat received:', { stage, message: String(message).slice(0, 200), user: user ? { uid: user.uid } : null, stateKeys: Object.keys(state || {}) }); } catch (e) {}
   const prompt = buildStagePrompt({ user, stage, message, state });
   let text = '';
   try {
@@ -380,7 +425,16 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
     const hasCore = (state?.locations?.length || state?.region) && (state?.durationDays || (state?.startDate && state?.endDate));
     if (wantsGenerate || hasCore) {
       try {
-        const md = await generateItineraryMarkdown({ user, state });
+        // Try to include the user's saved travelProfile (DNA) from Firestore
+        let travelProfile = {};
+        try {
+          const adm = ensureFirebaseAdmin();
+          if (adm && user && user.uid) {
+            const doc = await adm.firestore().collection('users').doc(user.uid).get();
+            if (doc.exists) travelProfile = doc.data().travelProfile || {};
+          }
+        } catch (e) { /* ignore */ }
+        const md = await generateItineraryMarkdown({ user, state, travelProfile });
         text = md; // Return the markdown document
         stageNext = STAGES.iterate;
         // After generation, invite refinement
@@ -396,6 +450,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
 
   // Include suggestions when present so frontend can render chips
   const resp = { reply: text, stageNext, quickOptions, input, hints };
+  try { console.log('[VoyagerAI] generateChat responding:', { replyPreview: String(text).slice(0,200), stageNext, inputType: input?.type, hints }); } catch (e) {}
   if (Array.isArray(suggestions) && suggestions.length) resp.suggestions = suggestions;
   return resp;
 }
