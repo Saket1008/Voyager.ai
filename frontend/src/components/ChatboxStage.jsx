@@ -125,7 +125,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId), [chats, activeId]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [stage, setStage] = useState('greeting');
+  // Frontend is a dumb renderer; backend provides stage/inputSpec/quickOptions
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
   const [flowState, setFlowState] = useState({});
@@ -166,14 +166,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           if (String(last.content) === String(newMsg.content)) return c;
         }
       }
-      // Avoid adding multiple assistant replies for the same stage: if an assistant message was already recorded for this stage, skip.
+      // Avoid adding duplicate assistant replies for the same stage: track stage info attached to assistant messages
       if (role === 'assistant') {
         try {
           const lastStage = lastAssistantStageRef.current[chatId];
-          const currentStage = stage;
-          if (lastStage && currentStage && lastStage === currentStage) {
+          const newStage = newMsg?.inputSpec?.stage || newMsg?.stage || newMsg?.stageNext || undefined;
+          if (lastStage && newStage && lastStage === newStage) {
             return c; // skip duplicate assistant reply for same stage
           }
+          // record the stage for this assistant message
+          if (newStage) lastAssistantStageRef.current[chatId] = newStage;
         } catch (e) {}
       }
       msgs.push(newMsg);
@@ -195,15 +197,18 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
     try {
       const token = await getFirebaseIdToken();
+      // Determine the stage to send: prefer explicit override, otherwise infer from last assistant message.
+      const lastAssistant = (activeChat?.messages || []).slice().reverse().find(m => m.role === 'assistant');
+      const inferredStage = lastAssistant?.inputSpec?.stage || lastAssistant?.stageNext || 'greeting';
+      const stageToSend = stageOverride || inferredStage || 'greeting';
+
       const payload = {
         mode: 'chat',
         message: msg,
-        stage: stageOverride || stage,
+        stage: stageToSend,
         user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
         state: flowState,
       };
-      // If caller requested a stage override, reflect it in local UI state immediately so subsequent quickOptions are in correct context
-      if (stageOverride) setStage(stageOverride);
       const res = await fetch(`${base}/api/chat`, {
         method: 'POST',
         headers: {
@@ -215,11 +220,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       const data = await res.json();
 
       const reply = data?.reply || data?.message || '...';
+      // Include backend metadata in the assistant message so the UI can render accordingly
       const assistantMsg = { content: reply };
       if (Array.isArray(data?.suggestions) && data.suggestions.length) assistantMsg.suggestions = data.suggestions;
+      if (data?.input) assistantMsg.inputSpec = data.input;
+      if (data?.stageNext) assistantMsg.stageNext = data.stageNext;
+      if (data?.hints) assistantMsg.hints = data.hints;
+
       pushMessage(chatId, 'assistant', assistantMsg);
 
-      if (data?.stageNext) setStage(data.stageNext);
+      // Update UI controls from backend response
       if (data?.input) setInputSpec(data.input);
       if (Array.isArray(data?.quickOptions)) setQuickOptions(data.quickOptions);
       if (data?.state) setFlowState(data.state);
@@ -255,10 +265,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     const c = { id, title: 'New chat', messages: [] };
     setChats((p) => [c, ...p]);
     setActiveId(id);
-    setStage('greeting');
-    setFlowState({});
-    setQuickOptions([]);
-    setInputSpec({ type: 'freeText' });
+  setFlowState({});
+  setQuickOptions([]);
+  setInputSpec({ type: 'freeText' });
+  // Request greeting from backend for this new chat
+  setTimeout(() => { sendMessage('', 'greeting'); }, 50);
   };
 
   // Load saved chats & search from localStorage on mount

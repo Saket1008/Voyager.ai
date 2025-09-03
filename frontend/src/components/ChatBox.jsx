@@ -92,6 +92,7 @@ const Chatbox = ({ onEditProfile, user }) => {
   const messagesEndRef = useRef(null);
   const [flowState, setFlowState] = useState({}); // persistent state from backend
   const [inputSpec, setInputSpec] = useState(null); // backend input instructions
+  const [serverStage, setServerStage] = useState(null);
 
   // Fetch user's DNA profile
   useEffect(() => {
@@ -122,22 +123,7 @@ const Chatbox = ({ onEditProfile, user }) => {
     return () => { ignore = true; };
   }, [currentUser]);
 
-  // New Itinerary staged flow (per-journey)
-  const STAGES = [
-    'greeting',
-    'ask_intent',
-    'input_locations',
-    'input_region',
-    'ask_duration',
-    'ask_dates',
-    'ask_travelers',
-    'must_haves',
-    'must_nots',
-    'generate_suggestions',
-  ];
-
-  const [stageIndex, setStageIndex] = useState(0);
-  const stage = STAGES[stageIndex];
+  // The frontend no longer tracks local stages; backend is the source of truth.
   const [trip, setTrip] = useState({
     intent: null,
     destinations: [],
@@ -150,27 +136,12 @@ const Chatbox = ({ onEditProfile, user }) => {
     mustNots: '',
   });
 
-  useEffect(() => {
-    // Initial greeting message
-    const who = currentUser?.displayName || user?.displayName || 'Traveler';
-    const welcome = `Welcome, ${who}!`;
-    const greeting = `${welcome} Ready to plan a new trip?`;
-    // avoid duplicating the greeting if already present
-    setMessages((prev) => {
-      if (Array.isArray(prev) && prev.length > 0) {
-        const first = prev[0];
-        if (first && first.role === 'assistant' && String(first.content) === greeting) return prev;
-      }
-      return [{ role: 'assistant', content: greeting }];
-    });
-    setStageIndex(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, user]);
+  // NOTE: initial assistant greeting is requested from the backend (see the effect below)
 
   // Initial greeting effect: trigger backend 'greeting' when there are no messages
   useEffect(() => {
     if (messages.length === 0 && !isLoading && currentUser) {
-      // Trigger the backend 'greeting' stage so the assistant reply is produced server-side.
+      // Request the backend to produce the initial greeting.
       send('', {}, 'greeting');
     }
   }, [messages.length, isLoading, currentUser, send]);
@@ -237,7 +208,9 @@ const Chatbox = ({ onEditProfile, user }) => {
 
       // Update flowState and inputSpec from backend
       setFlowState(aiResponse.state || {});
-      setInputSpec(aiResponse.input || aiResponse.inputSpec || null);
+  setInputSpec(aiResponse.input || aiResponse.inputSpec || null);
+  // Trust backend-provided next stage
+  if (aiResponse.stageNext) setServerStage(aiResponse.stageNext);
 
       const aiFullMessage = {
         role: 'assistant',
@@ -256,14 +229,9 @@ const Chatbox = ({ onEditProfile, user }) => {
     }
   }, [isLoading, currentUser, flowState, currentChatStage]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, stageIndex]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  function goNext() {
-    setStageIndex((s) => Math.min(STAGES.length - 1, s + 1));
-  }
-  function goBack() {
-    setStageIndex((s) => Math.max(0, s - 1));
-  }
+  // Local navigation removed. Backend controls stage transitions.
 
   function setTripField(key, value) {
     setTrip((t) => ({ ...t, [key]: value }));
@@ -342,7 +310,6 @@ const Chatbox = ({ onEditProfile, user }) => {
       }
 
   pushMessage('assistant', assistantContent || 'No response');
-      setStageIndex(STAGES.indexOf('generate_suggestions'));
     } catch (e) {
       console.error('itinerary generation failed', e);
   pushMessage('assistant', `Failed to generate itinerary: ${e.message}`);
@@ -389,13 +356,18 @@ const Chatbox = ({ onEditProfile, user }) => {
     if (!startDate) return;
     const iso = startDate.toISOString().slice(0, 10); // yyyy-mm-dd
     setTripField('dateStart', iso);
-  goNext();
+    // Inform backend of the date selection; backend will respond with the next prompt.
+    send(iso, { startDate: iso }, serverStage || currentChatStage);
   };
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (stage === 'input_locations') {
+      // If backend expects locations input (legacy name) or serverStage indicates input_locations, treat Enter as addDestination
+      if ((inputSpec && inputSpec.type === 'locations') || serverStage === 'input_locations') {
         addDestination(input);
+      } else {
+        // otherwise send as normal chat message
+        send(input, {}, serverStage || currentChatStage);
       }
     }
   };
@@ -419,7 +391,15 @@ const Chatbox = ({ onEditProfile, user }) => {
                 <div className="h-full p-3">
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-sm font-semibold text-white/80">My Journeys</div>
-                    <button onClick={() => { setMessages([]); pushMessage('assistant', `Welcome, ${currentUser?.displayName || user?.displayName || 'Traveler'}! Ready to plan a new trip?`); setFlowIndex(0); setTripAnswers({}); setInput(''); setCurrentSelections([]); }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
+                    <button onClick={async () => {
+                      // Reset local UI state and request a fresh greeting from backend
+                      setMessages([]);
+                      setFlowIndex(0);
+                      setTripAnswers({});
+                      setInput('');
+                      setCurrentSelections([]);
+                      await send('', {}, 'greeting');
+                    }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">New</button>
                   </div>
                   <div className="h-[calc(100%-2rem)] overflow-y-auto">
                     <JourneyHistory />
@@ -471,135 +451,22 @@ const Chatbox = ({ onEditProfile, user }) => {
             </div>
           </div>
 
-          {/* Composer */}
+          {/* Composer (server-driven) */}
           <div className="border-t border-white/10 bg-black/20 p-4 backdrop-blur-md">
             <div className="mx-auto max-w-3xl">
-              {stage === 'ask_intent' && (
+              {inputSpec && inputSpec.type === 'options' ? (
                 <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">Do you have specific places in mind, or just a region?</div>
-                  <div className="flex gap-2">
-                    <button onClick={async () => { setTripField('intent', 'locations'); await send('I have specific locations', {}, 'ask_intent'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I have specific places</button>
-                    <button onClick={async () => { setTripField('intent', 'region'); await send('I only know a region', {}, 'ask_intent'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">I only know a region</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'input_locations' && (
-                <div className="flex flex-col gap-2">
-                  <div className="text-sm font-medium">Add destinations (click suggestion or press Enter)</div>
-                  <div className="flex gap-2">
-                    <input value={input} onChange={(e) => handleDestinationInputChange(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDestination(input); } }} className="flex-1 rounded-md bg-transparent border border-white/10 px-3 py-2" placeholder="Type a city or place" />
-                    <button onClick={() => addDestination(input)} className="rounded-md bg-blue-600 px-3 py-2">Add</button>
-                  </div>
-                  {suggestions.length > 0 && (
-                    <div className="mt-2 rounded-md border border-white/10 bg-black/60">
-                      {suggestions.map((s) => (
-                        <button key={s} onClick={() => addDestination(s)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10">{s}</button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {(trip.destinations || []).map((d) => (
-                      <div key={d} className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-1">
-                        <span className="text-xs">{d}</span>
-                        <button onClick={() => removeDestination(d)} className="text-xs text-red-400">✕</button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'input_region' && (
-                <div className="flex flex-col gap-2">
-                  <div className="text-sm font-medium">Which region or area are you interested in?</div>
-                  <input value={trip.region || ''} onChange={(e) => setTripField('region', e.target.value)} className="rounded-md bg-transparent border border-white/10 px-3 py-2" placeholder="e.g., Kyoto region" />
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'ask_duration' && (
-                <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">How many days will the trip be?</div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={decrementDuration} className="rounded-md border border-white/10 px-3 py-2 bg-white/5">-</button>
-                      <input
-                        type="number"
-                        min={1}
-                        value={trip.durationDays || ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          // keep empty as null so clearing doesn't produce 0
-                          setTripField('durationDays', v === '' ? null : Math.max(1, Number(v)));
-                        }}
-                        className="w-24 rounded-md bg-transparent border border-white/10 px-3 py-2"
-                      />
-                      <button type="button" onClick={incrementDuration} className="rounded-md border border-white/10 px-3 py-2 bg-white/5">+</button>
-                    </div>
-                    <label className="text-xs text-white/60"><input type="checkbox" checked={trip.dateFlex === 'start'} onChange={(e) => setTripField('dateFlex', e.target.checked ? 'start' : 'none')} /> Flexible start date</label>
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    {[3,5,7].map((n) => (
-                      <button key={n} type="button" onClick={() => setDurationPreset(n)} className="rounded-md border border-white/20 bg-white/10 px-3 py-1 text-sm">{n} days</button>
-                    ))}
-                  </div>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'ask_dates' && (
-                <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">Select a start date</div>
-                  <div>
-                    <DatePicker selected={trip.dateStart ? new Date(trip.dateStart) : startDate} onChange={(date) => { setStartDate(date); setTripField('dateStart', date ? date.toISOString().slice(0,10) : null); }} inline />
-                  </div>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={handleConfirmDate} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'ask_travelers' && (
-                <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">Who's traveling?</div>
-                  <div className="flex gap-2">
-                    {['Solo Traveler','A Couple','Family','A Group of Friends'].map((label) => (
-                      <button key={label} onClick={async () => { setTripField('travelers', label); await send(label, {}, 'ask_travelers'); goNext(); }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">{label}</button>
+                  <div className="text-sm font-medium">{inputSpec.prompt || 'Choose an option'}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(inputSpec.options || []).map((opt) => (
+                      <button key={opt.value ?? opt} onClick={async () => { try { await send(opt.value ?? opt, {}, serverStage || currentChatStage); } catch (e) {} }} className="rounded-md border border-white/20 bg-white/10 px-3 py-1 text-sm">{opt.label ?? opt}</button>
                     ))}
                   </div>
                 </div>
-              )}
-
-              {stage === 'must_haves' && (
-                <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">Anything you absolutely must see or do?</div>
-                  <TextareaAutosize value={trip.mustHaves} onChange={(e) => setTripField('mustHaves', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" minRows={2} maxRows={6} />
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={goNext} className="rounded-md bg-blue-600 px-3 py-1">Next</button>
-                  </div>
-                </div>
-              )}
-
-              {stage === 'must_nots' && (
-                <div className="flex flex-col gap-3">
-                  <div className="text-sm font-medium">Anything to avoid?</div>
-                  <TextareaAutosize value={trip.mustNots} onChange={(e) => setTripField('mustNots', e.target.value)} className="rounded-md bg-transparent border border-white/10 p-3" minRows={2} maxRows={6} />
-                  <div className="mt-3 flex justify-between">
-                    <button onClick={goBack} className="rounded-md border border-white/20 bg-white/10 px-3 py-1">Back</button>
-                    <button onClick={handleGenerateItinerary} className="rounded-md bg-green-500 px-3 py-1">Generate Itinerary</button>
-                  </div>
+              ) : (
+                <div className="flex items-center gap-3 rounded-full bg-white/5 backdrop-blur-md p-3">
+                  <TextareaAutosize value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input, {}, serverStage || currentChatStage); } }} minRows={1} maxRows={6} placeholder={inputSpec?.placeholder || 'Type your message...'} className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" />
+                  <button onClick={() => send(input, {}, serverStage || currentChatStage)} disabled={!input.trim()} className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold">Send</button>
                 </div>
               )}
             </div>

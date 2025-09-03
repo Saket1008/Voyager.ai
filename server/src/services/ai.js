@@ -414,8 +414,13 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
 
   const hasMustNots = stage === STAGES.must_nots && ((state?.must_nots) || String(message||'').trim());
   if (hasMustNots) text = nextPromptFor(STAGES.generate_suggestions);
-  const input = inputSpecForStage(stageNext ? stageNext : stage);
-  let quickOptions = input.type === 'options' ? input.options : undefined;
+  // Normalize next stage and input spec (frontend should always receive an input object)
+  const resolvedStageNext = stageNext || stage;
+  const input = inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
+
+  // quickOptions may have been set above (e.g., generation stage). If not, derive from input spec.
+  // Ensure frontend always receives an array (possibly empty) instead of undefined.
+  let quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
 
   // If we're at the generation stage, allow immediate itinerary generation in Markdown
   if (stage === STAGES.generate_suggestions) {
@@ -448,9 +453,21 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
     }
   }
 
-  // Include suggestions when present so frontend can render chips
-  const resp = { reply: text, stageNext, quickOptions, input, hints };
-  try { console.log('[VoyagerAI] generateChat responding:', { replyPreview: String(text).slice(0,200), stageNext, inputType: input?.type, hints }); } catch (e) {}
+  // Final normalization: make sure reply, stageNext, input, quickOptions, hints are always present.
+  const reply = (text && String(text).trim().length) ? text : 'Let\'s continue.';
+  const finalStageNext = resolvedStageNext;
+
+  // If quickOptions wasn't set by logic above, derive from input spec for options/multiselect.
+  if (!Array.isArray(quickOptions) || quickOptions.length === 0) {
+    if (input && (input.type === 'options' || input.type === 'multiselect')) {
+      quickOptions = Array.isArray(input.options) ? input.options : [];
+    } else {
+      quickOptions = [];
+    }
+  }
+
+  const resp = { reply, stageNext: finalStageNext, input, quickOptions, hints };
   if (Array.isArray(suggestions) && suggestions.length) resp.suggestions = suggestions;
+  try { console.log('[VoyagerAI] generateChat responding:', { replyPreview: String(reply).slice(0,200), stageNext: finalStageNext, inputType: input?.type, hints }); } catch (e) {}
   return resp;
 }
