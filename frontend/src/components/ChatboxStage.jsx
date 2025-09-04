@@ -976,7 +976,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         setFlowState(prev => ({ ...prev, ...data.state }));
       }
 
-      // Build assistant message
+      // Build assistant message (markdown or plain text)
       const assistantMsg = {
         content: data?.reply || data?.message,
         suggestions: data?.suggestions,
@@ -987,6 +987,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       };
 
       pushMessage(chatId, 'assistant', assistantMsg);
+
+      // If the server provided itinerary card items, render them as a separate assistant message
+      if (Array.isArray(data?.itineraryItems) && data.itineraryItems.length) {
+        pushMessage(chatId, 'assistant', { type: 'itinerary-json', content: data.itineraryItems });
+      }
 
     } catch (err) {
       pushMessage(chatId, 'assistant', `Sorry, I encountered an error: ${err.message}`);

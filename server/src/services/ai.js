@@ -483,11 +483,57 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
             if (doc.exists) travelProfile = doc.data().travelProfile || {};
           }
         } catch (e) { /* ignore */ }
-        const md = await generateItineraryMarkdown({ user, state, travelProfile });
-        text = md; // Return the markdown document
+        // Generate both markdown and JSON so UI can present cards
+        const [md, jsonPlan] = await Promise.all([
+          generateItineraryMarkdown({ user, state, travelProfile }),
+          generateItinerary({ ...state, user })
+        ]);
+        text = md; // Primary reply as markdown document
         stageNext = STAGES.iterate;
         // After generation, invite refinement
         quickOptions = ['Change dates', 'Adjust pace', 'Focus on food', 'Add hidden gems'];
+
+        // Build lightweight card items for UI
+        const items = [];
+        try {
+          if (jsonPlan?.summary) {
+            items.push({
+              type: 'info',
+              title: 'Trip Overview',
+              description: `Days: ${jsonPlan.summary.recommended_days || state.durationDays || ''}  |  Best months: ${jsonPlan.summary.best_months || '—'}  |  Est. budget: ${jsonPlan.summary.estimated_budget || '—'}`.trim()
+            });
+          }
+          if (Array.isArray(jsonPlan?.daily_plan)) {
+            for (const day of jsonPlan.daily_plan) {
+              const dayLabel = typeof day.day !== 'undefined' ? `Day ${day.day}` : 'Day';
+              const city = day.city ? ` — ${day.city}` : '';
+              items.push({ type: 'info', title: `${dayLabel}${city}` });
+              if (Array.isArray(day.activities)) {
+                for (const act of day.activities) {
+                  const t = typeof act === 'string' ? act : (act?.title || act?.name || 'Activity');
+                  const desc = typeof act === 'string' ? '' : (act?.description || '');
+                  const time = act?.time || '';
+                  items.push({ type: 'activity', title: t, description: desc, time });
+                }
+              }
+            }
+          }
+          if (Array.isArray(jsonPlan?.hotels) && jsonPlan.hotels.length) {
+            for (const h of jsonPlan.hotels) {
+              items.push({ type: 'lodging', title: h.name || 'Hotel', description: `${h.city || ''} · ${h.checkIn || ''} → ${h.checkOut || ''}`.trim() });
+            }
+          }
+          if (Array.isArray(jsonPlan?.flights) && jsonPlan.flights.length) {
+            for (const f of jsonPlan.flights) {
+              items.push({ type: 'info', title: `Flight: ${f.from || ''} → ${f.to || ''}`, description: `${f.date || ''} · ${f.airline || ''}`.trim() });
+            }
+          }
+          // Attach items for frontend to optionally render as cards
+          // We'll pass via a symbol property; later we include it in resp below
+          // Use a local variable to capture and include in final response
+          // eslint-disable-next-line no-var
+          var itineraryItems = items;
+        } catch {}
       } catch (e) {
         // Fall back to a concise confirmation prompt
         text = text || 'I can generate your detailed itinerary now. Shall I proceed?';
@@ -511,6 +557,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   }
 
   const resp = { reply, stageNext: finalStageNext, input, quickOptions, hints };
+  // Include optional itineraryItems when present (from generation stage)
+  try { if (typeof itineraryItems !== 'undefined' && Array.isArray(itineraryItems)) resp.itineraryItems = itineraryItems; } catch {}
   if (Array.isArray(suggestions) && suggestions.length) resp.suggestions = suggestions;
   try { console.log('[VoyagerAI] generateChat responding:', { replyPreview: String(reply).slice(0,200), stageNext: finalStageNext, inputType: input?.type, hints }); } catch (e) {}
   return resp;

@@ -14,12 +14,8 @@ router.post('/', async (req, res) => {
     const stageSafe = stage || STAGES.greeting;
     const data = await generateChat({ message, stage: stageSafe, user: user || null, state: state || {} });
 
-    // If the assistant reply looks like a full markdown itinerary, return as markdown
-    const replyText = String(data?.reply || '');
-    if (replyText.trim().startsWith('#')) {
-      return res.type('text/markdown').send(replyText);
-    }
-    return res.json(data);
+  // Always respond with JSON; the frontend renderer decides how to display (markdown, cards, etc.)
+  return res.json(data);
   } catch (err) {
     console.error('chat route error', err);
     // Graceful fallback for chat mode so the UI can proceed even if model/env fails
