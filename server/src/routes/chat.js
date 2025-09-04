@@ -19,7 +19,6 @@ router.post('/', async (req, res) => {
     if (replyText.trim().startsWith('#')) {
       return res.type('text/markdown').send(replyText);
     }
-    console.log('Backend sending this data:', JSON.stringify(data, null, 2));
     return res.json(data);
   } catch (err) {
     console.error('chat route error', err);
@@ -30,7 +29,6 @@ router.post('/', async (req, res) => {
       input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
       quickOptions: ['I have specific locations', 'I only know a region'],
     };
-    console.log('Backend sending this data (fallback):', JSON.stringify(fallback, null, 2));
     return res.status(200).json(fallback);
   }
 });
