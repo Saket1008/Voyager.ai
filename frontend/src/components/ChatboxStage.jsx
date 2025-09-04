@@ -190,56 +190,49 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
   };
 
   if (inputSpec?.type === 'options') {
-    // Check if this is a pace question based on the options
-    const isPaceQuestion = quickOptions?.some(opt => 
-      /relaxed|balanced|action|fixed/i.test(opt)
-    );
-    
-    if (isPaceQuestion) {
-      // Special styling for pace options
-      return (
-        <div className="space-y-6">
-          <div className="text-center text-white/80 text-sm mb-6">What's your preferred travel pace?</div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            {(quickOptions || []).map((opt, i) => {
-              const paceDescriptions = {
-                'Relaxed': 'Take it easy, plenty of downtime',
-                'Balanced': 'Mix of activities and rest',
-                'Action-Packed': 'See and do as much as possible',
-                'Fixed Schedule': 'Stick to planned itinerary'
-              };
-              
-              return (
-                <button
-                  key={i}
-                  onClick={() => handleSubmit(opt)}
-                  className="p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group"
-                >
-                  <div className="font-medium text-base text-purple-200 group-hover:text-purple-100">{opt}</div>
-                  <div className="text-xs opacity-75 mt-1 text-white/70">
-                    {paceDescriptions[opt] || 'Travel at your preferred speed'}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-    
-    // Regular options styling
+    // Unified option card style with mini descriptions for all option prompts
+    const descriptionFor = (label) => {
+      const map = {
+        // Intent
+        'I have specific locations': 'Type your list of places',
+        'I only know a region': 'We’ll suggest cities and routes',
+        // Travelers
+        'Solo Traveler': 'Independent trip for one',
+        'A Couple': 'Two travelers together',
+        'Family': 'Family-friendly planning',
+        'A Group of Friends': 'Fun and flexible group plans',
+        // Pace
+        'Relaxed': 'Take it easy, plenty of downtime',
+        'Balanced': 'Mix of activities and rest',
+        'Action-Packed': 'See and do as much as possible',
+        'Fixed Schedule': 'Stick to planned itinerary',
+        // Budget
+        'Budget-Friendly': 'Keep costs low and smart',
+        'Mid-Range': 'Comfort plus value',
+        'Luxury': 'Premium stays and experiences',
+        // Generation
+        'Generate itinerary': 'Create your detailed day-by-day plan now',
+      };
+      return map[label] || 'Make a selection to continue';
+    };
+
+    const opts = quickOptions || [];
+    const gridCols = opts.length <= 1 ? 'grid-cols-1' : opts.length === 2 ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3';
+
     return (
-      <div className="flex flex-wrap gap-3 justify-center">
-        {(quickOptions || []).map((opt, i) => (
-          <button
-            key={i}
-            onClick={() => handleSubmit(opt)}
-            className="px-6 py-3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium hover:from-blue-600 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
-          >
-            {opt}
-          </button>
-        ))}
+      <div className="space-y-4">
+        <div className={`grid ${gridCols} gap-4`}>
+          {opts.map((opt, i) => (
+            <button
+              key={i}
+              onClick={() => handleSubmit(opt)}
+              className="p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left"
+            >
+              <div className="font-medium text-base text-purple-200 group-hover:text-purple-100">{opt}</div>
+              <div className="text-xs opacity-75 mt-1 text-white/70">{descriptionFor(opt)}</div>
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -815,43 +808,29 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     messagesLength: activeChat?.messages?.length || 0
   });
 
-  // Fix for question/option mismatch: ensure inputSpec matches stage
+  // Let server drive inputSpec; only fill reasonable defaults if missing
   useEffect(() => {
-    const getExpectedInputForStage = (currentStage) => {
-      switch (currentStage) {
-        case 'ask_intent':
-          return { type: 'options', options: ['I have specific locations', 'I only know a region'] };
-        case 'ask_experience':
-          return { type: 'options', options: ['Beginner', 'Intermediate', 'Advanced'] };
-        case 'ask_duration':
-          return { type: 'days' };
-        case 'ask_dates':
-          return { type: 'dates' };
-        case 'ask_travelers':
-          return { type: 'options', options: ['Solo Traveler', 'A Couple', 'Family', 'A Group of Friends'] };
-        case 'ask_pace':
-          return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed', 'Fixed Schedule'] };
-        case 'ask_interests':
-          return { type: 'multiselect', options: ['History & Museums','Food & Local Cuisine','Adventure & Outdoors','Art & Culture','Nightlife & Entertainment','Shopping','Relaxation & Wellness'] };
-        case 'ask_budget':
-          return { type: 'options', options: ['Budget-Friendly','Mid-Range','Luxury'] };
-        case 'greeting':
-          return { type: 'options', options: ['I have specific locations', 'I only know a region'] };
-        default:
-          return { type: 'freeText' };
-      }
-    };
-
-    const expectedInput = getExpectedInputForStage(stage);
-    
-    // If there's a mismatch, fix it
-    if (inputSpec?.type !== expectedInput.type) {
-      console.log('🔧 Fixing inputSpec mismatch:', {
-        currentStage: stage,
-        currentInputSpec: inputSpec,
-        expectedInput
-      });
-      setInputSpec(expectedInput);
+    if (!inputSpec || !inputSpec.type) {
+      // Minimal fallback map if server didn't provide input
+      const fallback = {
+        greeting: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
+        ask_intent: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
+        ask_duration: { type: 'days' },
+        ask_dates: { type: 'dates' },
+        ask_travelers: { type: 'options', options: ['Solo Traveler', 'A Couple', 'Family', 'A Group of Friends'] },
+        ask_pace: { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] },
+        ask_interests: { type: 'multiselect', options: [
+          'History & Museums',
+          'Food & Local Cuisine',
+          'Adventure & Outdoors',
+          'Art & Culture',
+          'Nightlife & Entertainment',
+          'Shopping',
+          'Relaxation & Wellness',
+        ] },
+        ask_budget: { type: 'options', options: ['Budget-Friendly','Mid-Range','Luxury'] },
+      };
+      setInputSpec(fallback[stage] || { type: 'freeText' });
     }
   }, [stage, inputSpec]);
 
@@ -917,119 +896,105 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   // This function is now the single source of truth for sending messages.
   // It correctly uses the component's `stage` state and updates it from the server's `stageNext` response.
   async function sendMessage(text = '', stageOverride = undefined) {
-  if (sendingRef.current) {
-    console.log('Preventing concurrent send');
-    return;
+    if (sendingRef.current) {
+      return;
+    }
+    sendingRef.current = true;
+
+    const chatId = activeId;
+    const msg = text.trim();
+
+    if (!msg && !stageOverride) {
+      sendingRef.current = false;
+      return;
+    }
+
+    try {
+      // Remove unwanted message before dates summary
+      if (stage === 'ask_dates' && activeChat?.messages?.length) {
+        const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+        if (lastMsg?.content?.includes('Pick a start date. I’ll auto-calculate the return date from your days.')) {
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: c.messages.slice(0, -1) } : c));
+        }
+      }
+
+      // Add user message
+      const prevMessage = activeChat?.messages?.[activeChat.messages.length - 1];
+      if (msg && (!prevMessage || prevMessage.role !== 'user' || prevMessage.content !== msg)) {
+        pushMessage(chatId, 'user', msg);
+      }
+      setInput('');
+      setIsTyping(true);
+
+      const token = await getFirebaseIdToken();
+      const stageToSend = stageOverride || stage || 'greeting';
+
+      const payload = {
+        mode: 'chat',
+        message: msg,
+        stage: stageToSend,
+        user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
+        state: flowState,
+      };
+
+      const res = await fetch(`${base}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}: ${await res.text()}`);
+      }
+
+      const data = await res.json();
+
+
+
+      // Remove unwanted summary message if present
+      if (activeChat?.messages?.length) {
+        const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+        if (lastMsg?.content?.includes('Pick a start date. I’ll auto-calculate the return date from your days.')) {
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: c.messages.slice(0, -1) } : c));
+        }
+      }
+
+      // Update stage and inputSpec
+      if (data?.stageNext && data.stageNext !== stage) {
+        setStage(data.stageNext);
+      }
+      if (data?.input) {
+        setInputSpec(data.input);
+      }
+      if (Array.isArray(data?.quickOptions)) {
+        setQuickOptions(data.quickOptions);
+      }
+      if (data?.state) {
+        setFlowState(prev => ({ ...prev, ...data.state }));
+      }
+
+      // Build assistant message
+      const assistantMsg = {
+        content: data?.reply || data?.message,
+        suggestions: data?.suggestions,
+        inputSpec: data?.input,
+        currentStage: data?.stageNext || stage,
+        nextStage: data?.stageNext,
+        hints: data?.hints,
+      };
+
+      pushMessage(chatId, 'assistant', assistantMsg);
+
+    } catch (err) {
+      pushMessage(chatId, 'assistant', `Sorry, I encountered an error: ${err.message}`);
+    } finally {
+      setIsTyping(false);
+      sendingRef.current = false;
+    }
   }
-  sendingRef.current = true;
-
-  const chatId = activeId;
-  const msg = text.trim();
-
-  if (!msg && !stageOverride) {
-    sendingRef.current = false;
-    return;
-  }
-
-  try {
-    const prevMessage = activeChat?.messages?.[activeChat.messages.length - 1];
-    if (msg && (!prevMessage || prevMessage.role !== 'user' || prevMessage.content !== msg)) {
-      pushMessage(chatId, 'user', msg);
-    }
-    setInput('');
-    setIsTyping(true);
-
-    const token = await getFirebaseIdToken();
-    const stageToSend = stageOverride || stage || 'greeting';
-
-    const payload = {
-      mode: 'chat',
-      message: msg,
-      stage: stageToSend,
-      user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
-      state: flowState,
-    };
-
-    const res = await fetch(`${base}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Server responded with ${res.status}: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    
-    // 🔍 Debug logging to trace stage transitions
-    console.log("🔎 Server response:", data);
-    console.log("➡️ Current stage:", stage, " | Next stage:", data.stageNext);
-    
-    if (!data?.reply && !data?.message) {
-      throw new Error('Invalid server response - no message content');
-    }
-
-    const validStages = [
-      'greeting',
-      'ask_intent',
-      'input_locations',
-      'input_region',
-      'ask_duration',
-      'ask_dates',
-      'ask_travelers',
-      'ask_pace',
-      'ask_interests',
-      'ask_budget',
-      'must_haves',
-      'must_nots',
-      'generate_suggestions',
-      'iterate'
-    ];
-
-    if (!data?.stageNext) {
-      console.warn('Server response missing stageNext property');
-    } else if (!validStages.includes(data.stageNext)) {
-      console.warn(`Unexpected stage: ${data.stageNext}`);
-    }
-
-    // ✅ Update stage + input BEFORE building assistant message
-    if (data?.stageNext && data.stageNext !== stage) {
-      setStage(data.stageNext);
-    }
-    if (data?.input) {
-      setInputSpec(data.input);
-    }
-    if (Array.isArray(data?.quickOptions)) {
-      setQuickOptions(data.quickOptions);
-    }
-    if (data?.state) {
-      setFlowState(prev => ({ ...prev, ...data.state }));
-    }
-
-    // ✅ Build assistant message with UPDATED values
-    const assistantMsg = {
-      content: data?.reply || data?.message,
-      suggestions: data?.suggestions,
-      inputSpec: data?.input,
-      currentStage: data?.stageNext || stage,
-      nextStage: data?.stageNext,
-      hints: data?.hints,
-    };
-
-    pushMessage(chatId, 'assistant', assistantMsg);
-
-  } catch (err) {
-    console.error('Chat send error:', err);
-    pushMessage(chatId, 'assistant', `Sorry, I encountered an error: ${err.message}`);
-  } finally {
-    setIsTyping(false);
-    sendingRef.current = false;
-  }
-}
 
 
   useEffect(() => {
@@ -1336,7 +1301,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
               <AnimatePresence mode="wait">
                 {inputSpec && (inputSpec.type === 'options' || inputSpec.type === 'multiselect' || inputSpec.type === 'dates' || inputSpec.type === 'days') ? (
                   <motion.div 
-                    key="options-panel" 
+                    key={stage} 
                     initial={{ opacity: 0, y: 30 }} 
                     animate={{ opacity: 1, y: 0 }} 
                     exit={{ opacity: 0, y: 30 }} 

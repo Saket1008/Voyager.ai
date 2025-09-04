@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { ensureFirebaseAdmin } from './firebaseAdmin.js';
 
 // Lazy init for Gemini client so dotenv can be loaded before first use.
 let _genAI = null;
@@ -36,6 +37,9 @@ export const STAGES = {
   ask_dates: 'ask_dates', // start date picker; auto-calc end date based on days; date flexibility radios
   // Traveler profile
   ask_travelers: 'ask_travelers', // solo/couple/family/friends
+  ask_pace: 'ask_pace',
+  ask_interests: 'ask_interests',
+  ask_budget: 'ask_budget',
   // (DNA-related questions removed — captured during onboarding)
   // Final polish
   must_haves: 'must_haves',
@@ -54,8 +58,12 @@ const NEXT_STAGE = {
   [STAGES.input_region]: STAGES.ask_duration,
   [STAGES.ask_duration]: STAGES.ask_dates,
   [STAGES.ask_dates]: STAGES.ask_travelers,
-  // All DNA questions are removed from the sequence
-  [STAGES.ask_travelers]: STAGES.generate_suggestions,
+  [STAGES.ask_travelers]: STAGES.ask_pace,
+  [STAGES.ask_pace]: STAGES.ask_interests,
+  [STAGES.ask_interests]: STAGES.ask_budget,
+  [STAGES.ask_budget]: STAGES.must_haves,
+  [STAGES.must_haves]: STAGES.must_nots,
+  [STAGES.must_nots]: STAGES.generate_suggestions,
   [STAGES.generate_suggestions]: STAGES.iterate,
   [STAGES.iterate]: STAGES.iterate,
 };
@@ -69,6 +77,9 @@ const EXPECTED_BEHAVIOR = {
   [STAGES.ask_duration]: 'Briefly ask for the number of days. Keep it one short sentence. If you know a typical duration for the selected places, mention it succinctly as a suggestion.',
   [STAGES.ask_dates]: 'Ask them to pick a start date. Mention that the return date will auto-calculate from the chosen number of days. Keep it short. If seasonality is known, mention the best months very briefly.',
   [STAGES.ask_travelers]: 'Ask who is traveling: Solo, Couple, Family, or Group of Friends. Keep it short.',
+  [STAGES.ask_pace]: 'Ask for preferred pace: Relaxed, Balanced, or Action-Packed. One short sentence.',
+  [STAGES.ask_interests]: 'Ask for main interests with a few examples (History, Food, Adventure, Art, Nightlife, Shopping, Relaxation). Allow choosing multiple. One short sentence.',
+  [STAGES.ask_budget]: 'Ask budget tier simply: Budget-Friendly, Mid-Range, or Luxury.',
   [STAGES.must_haves]: 'Ask for any must-see places or must-do activities. One short encouragement.',
   [STAGES.must_nots]: 'Ask for anything to avoid or constraints (e.g., big crowds, seafood, too much walking).',
   [STAGES.ask_experience]: 'Legacy: short experience question if needed.',
@@ -130,7 +141,7 @@ function inputSpecForStage(stage) {
     case STAGES.ask_travelers:
       return { type: 'options', options: ['Solo Traveler', 'A Couple', 'Family', 'A Group of Friends'] };
     case STAGES.ask_pace:
-      return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed', 'Fixed Schedule'] };
+  return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] };
     case STAGES.ask_interests:
       return { type: 'multiselect', options: ['History & Museums','Food & Local Cuisine','Adventure & Outdoors','Art & Culture','Nightlife & Entertainment','Shopping','Relaxation & Wellness'] };
     case STAGES.ask_budget:
@@ -394,7 +405,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
       case STAGES.ask_pace:
         return 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?';
       case STAGES.ask_interests:
-        return 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)';
+        return 'What are your main interests? (Select all that apply)';
       case STAGES.ask_budget:
         return 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?';
       case STAGES.must_haves:
@@ -412,17 +423,29 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   const hasDays = stage === STAGES.ask_duration && ((typeof state?.durationDays === 'number' && state.durationDays > 0) || /\d+/.test(String(message||'')));
   if (hasDays) text = nextPromptFor(STAGES.ask_dates);
 
-  const hasDates = stage === STAGES.ask_dates && ((state?.startDate && state?.endDate) || /\d{4}-\d{2}-\d{2}/.test(String(message||'')));
-  if (hasDates) text = nextPromptFor(STAGES.ask_travelers);
+  const hasDates = stage === STAGES.ask_dates && ((state?.startDate && state?.endDate) || /\d{4}-\d{2}-\d{2}/.test(String(message||'')) || /start:.*end:/i.test(String(message||'')));
+  if (hasDates) {
+    text = nextPromptFor(STAGES.ask_travelers);
+    stageNext = STAGES.ask_travelers;
+  }
 
   const hasTravelers = stage === STAGES.ask_travelers && ((state?.travelers) || /(solo|couple|family|friends)/i.test(String(message||'')));
-  if (hasTravelers) text = nextPromptFor(STAGES.ask_pace);
+  if (hasTravelers) {
+    text = nextPromptFor(STAGES.ask_pace);
+    stageNext = STAGES.ask_pace;
+  }
 
   const hasPace = stage === STAGES.ask_pace && ((state?.pace) || /(relaxed|balanced|action|fixed)/i.test(String(message||'')));
-  if (hasPace) text = nextPromptFor(STAGES.ask_interests);
+  if (hasPace) {
+    text = nextPromptFor(STAGES.ask_interests);
+    stageNext = STAGES.ask_interests;
+  }
 
   const hasInterests = stage === STAGES.ask_interests && ((Array.isArray(state?.interests) && state.interests.length) || /,/.test(String(message||'')));
-  if (hasInterests) text = nextPromptFor(STAGES.ask_budget);
+  if (hasInterests) {
+    text = nextPromptFor(STAGES.ask_budget);
+    stageNext = STAGES.ask_budget;
+  }
 
   const hasBudget = stage === STAGES.ask_budget && ((state?.budget) || /(budget|mid|luxury)/i.test(String(message||'')));
   if (hasBudget) text = nextPromptFor(STAGES.must_haves);
@@ -434,7 +457,11 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   if (hasMustNots) text = nextPromptFor(STAGES.generate_suggestions);
   // Normalize next stage and input spec (frontend should always receive an input object)
   const resolvedStageNext = stageNext || stage;
-  const input = inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
+    let forceInput = null;
+    if (stage === STAGES.generate_suggestions) {
+      forceInput = { type: 'options', options: ['Generate itinerary'] };
+    }
+    const input = forceInput || inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
 
   // Ensure frontend always receives an array (possibly empty) instead of undefined.
   quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
