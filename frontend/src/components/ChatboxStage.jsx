@@ -11,7 +11,7 @@ import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
 
 // Enhanced StageInput component with advanced date selection and pace options
-const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit }) => {
+const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage }) => {
   const [multiSel, setMultiSel] = useState([]);
   const [uiDays, setUiDays] = useState(flowState?.durationDays || 7);
   const [uiDaysFlex, setUiDaysFlex] = useState(flowState?.durationFlex || false);
@@ -44,13 +44,22 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     }
   }, [inputSpec?.type, flowState?.interests]);
 
+  // Helper: format date as local YYYY-MM-DD (avoid UTC toISOString off-by-one)
+  const fmtLocalYMD = (d) => {
+    if (!(d instanceof Date)) d = new Date(d);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   // Auto-calculate end date when start date and days are set
   useEffect(() => {
     if (uiStartDate && uiDays && inputSpec?.type === 'dates') {
       const start = new Date(uiStartDate);
       const end = new Date(start);
       end.setDate(start.getDate() + uiDays - 1);
-      setUiEndDate(end.toISOString().split('T')[0]);
+      setUiEndDate(fmtLocalYMD(end));
     }
   }, [uiStartDate, uiDays, inputSpec?.type]);
 
@@ -87,14 +96,14 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
 
   const isDateSelected = (day) => {
     if (!day) return false;
-    const date = new Date(calendarYear, calendarMonth, day).toISOString().split('T')[0];
+    const date = fmtLocalYMD(new Date(calendarYear, calendarMonth, day));
     return date === uiStartDate || date === uiEndDate;
   };
 
   const handleDateSelect = (day) => {
     if (!day) return;
-    const selectedDate = new Date(calendarYear, calendarMonth, day);
-    const dateString = selectedDate.toISOString().split('T')[0];
+  const selectedDate = new Date(calendarYear, calendarMonth, day);
+  const dateString = fmtLocalYMD(selectedDate);
     
     if (!uiStartDate || (uiStartDate && uiEndDate)) {
       // First click or resetting - set start date
@@ -137,9 +146,9 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     // Reset to match original duration
     if (uiStartDate && originalDays) {
       const start = new Date(uiStartDate);
-      const end = new Date(start);
-      end.setDate(start.getDate() + originalDays - 1);
-      setUiEndDate(end.toISOString().split('T')[0]);
+  const end = new Date(start);
+  end.setDate(start.getDate() + originalDays - 1);
+  setUiEndDate(fmtLocalYMD(end));
       setUiDays(originalDays);
     }
     setShowDurationWarning(false);
@@ -185,6 +194,17 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
       setFlowState(prev => ({ ...prev, interests: multiSel }));
       await onSubmit(multiSel.join(', '));
     } else {
+      // Free text stages
+      if (stage === 'input_region') {
+        const region = String(value || '').trim();
+        if (region) setFlowState(prev => ({ ...prev, region }));
+      } else if (stage === 'input_locations') {
+        const locations = String(value || '')
+          .split(/,|\n/)
+          .map(s => s.trim())
+          .filter(Boolean);
+        if (locations.length) setFlowState(prev => ({ ...prev, locations }));
+      }
       await onSubmit(value);
     }
   };
@@ -217,16 +237,24 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     };
 
     const opts = quickOptions || [];
-    const gridCols = opts.length <= 1 ? 'grid-cols-1' : opts.length === 2 ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3';
+    const gridCols = (() => {
+      const n = opts.length;
+      if (n === 1) return 'grid-cols-1';
+      if (n === 2) return 'grid-cols-2';
+      if (n === 3) return 'grid-cols-3'; // all in one line
+      if (n === 4) return 'grid-cols-2'; // 2 + 2, avoid 3+1
+      return 'grid-cols-2 md:grid-cols-3';
+    })();
 
+  const centerSingle = stage === 'generate_suggestions' && opts.length === 1;
     return (
       <div className="space-y-4">
-        <div className={`grid ${gridCols} gap-4`}>
+        <div className={`${centerSingle ? 'grid grid-cols-1 place-items-center' : `grid ${gridCols}`} gap-4`}>
           {opts.map((opt, i) => (
             <button
               key={i}
               onClick={() => handleSubmit(opt)}
-              className="p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left"
+              className={`p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left ${centerSingle ? 'min-w-[280px]' : ''}`}
             >
               <div className="font-medium text-base text-purple-200 group-hover:text-purple-100">{opt}</div>
               <div className="text-xs opacity-75 mt-1 text-white/70">{descriptionFor(opt)}</div>
@@ -302,23 +330,6 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               +
             </button>
           </div>
-          
-          {/* Quick day selection buttons */}
-          <div className="grid grid-cols-4 gap-2 mb-6">
-            {[3, 5, 7, 10, 14, 21, 30].map(days => (
-              <button
-                key={days}
-                onClick={() => setUiDays(days)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  uiDays === days
-                    ? 'bg-blue-500 text-white shadow-lg'
-                    : 'bg-white/10 text-white/90 hover:bg-white/20'
-                }`}
-              >
-                {days}d
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Simple flexibility checkbox with description */}
@@ -382,7 +393,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                     console.log('Start date changed:', e.target.value);
                   }}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none"
-                  min={new Date().toISOString().split('T')[0]}
+                    min={fmtLocalYMD(new Date())}
                 />
                 {uiStartDate && (
                   <p className="mt-1 text-xs text-white/70">{formatDate(uiStartDate)}</p>
@@ -415,7 +426,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                     }
                   }}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none"
-                  min={uiStartDate || new Date().toISOString().split('T')[0]}
+                  min={uiStartDate || fmtLocalYMD(new Date())}
                 />
                 {uiEndDate && (
                   <p className="mt-1 text-xs text-white/70">{formatDate(uiEndDate)}</p>
@@ -554,7 +565,8 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
 
               <div className="grid grid-cols-7 gap-1">
                 {generateCalendar().map((day, index) => {
-                  const isDisabled = !day || new Date(calendarYear, calendarMonth, day) < new Date().setHours(0,0,0,0);
+                  const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+                  const isDisabled = !day || new Date(calendarYear, calendarMonth, day) < todayMid;
                   return (
                     <button
                       key={index}
@@ -720,10 +732,10 @@ const ItineraryCards = ({ items }) => {
   );
 };
 
-const ChatMessage = ({ message, userName }) => {
+const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
   const isUser = message.role === 'user';
   const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white shadow-inner';
-  const userCls = 'ml-auto inline-block rounded-full px-4 py-2 text-sm font-medium text-white bg-gradient-to-br from-blue-500 to-indigo-600';
+  const userCls = 'ml-auto inline-block max-w-[70%] rounded-[18px] px-4 py-3 text-sm font-medium text-white bg-gradient-to-br from-[#16a34a] to-[#10b981] border border-white/10 shadow-inner';
 
   return (
     <div className={`flex items-start gap-4 my-6 ${isUser ? 'justify-end' : ''}`}>
@@ -743,10 +755,10 @@ const ChatMessage = ({ message, userName }) => {
               </div>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <button title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+              <button onClick={onRegenerate} title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <RefreshCw className="w-4 h-4" />
               </button>
-              <button title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+              <button onClick={() => onCopy(String(message.content ?? ''))} title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <Copy className="w-4 h-4" />
               </button>
             </div>
@@ -934,7 +946,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         message: msg,
         stage: stageToSend,
         user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
-        state: flowState,
+        state: { ...flowState },
       };
 
       const res = await fetch(`${base}/api/chat`, {
@@ -1054,7 +1066,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     }
 
     // For all other options, include the current stage as context
-    await sendMessage(opt, currentStage);
+  // For option stages, also echo to flowState when they convey concrete info
+  if (currentStage === 'ask_travelers') setFlowState(prev => ({ ...prev, travelers: opt }));
+  if (currentStage === 'ask_pace') setFlowState(prev => ({ ...prev, pace: opt }));
+  if (currentStage === 'ask_budget') setFlowState(prev => ({ ...prev, budget: opt }));
+  await sendMessage(opt, currentStage);
   };
   
   const handleKey = (e) => { 
@@ -1275,17 +1291,17 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
             }}
           >
             <div className="mx-auto max-w-3xl pt-2">
-              {activeChat?.messages?.map((m, i) => (
+        {activeChat?.messages?.map((m, i) => (
                 <div key={i}>
-                  <ChatMessage message={m} userName={fullNameOrEmail} />
+          <ChatMessage message={m} userName={fullNameOrEmail} onCopy={handleCopy} onRegenerate={handleRegenerate} />
                 </div>
               ))}
 
               {isTyping && (
                 <div className="my-4 flex items-start gap-4">
-                  <div className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
-                    <Bot className="h-6 w-6 text-white" />
-                  </div>
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/6 border border-white/10 overflow-hidden">
+                      <img src="/logo.png" alt="Voyager" className="h-8 w-8 object-contain animate-pulse" />
+                    </div>
                   <div className="w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse"></div>
@@ -1318,6 +1334,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         quickOptions={quickOptions}
                         flowState={flowState}
                         setFlowState={(s) => setFlowState(s)}
+                        stage={stage}
                         onSubmit={async (value) => {
                           // The `StageInput` component now just submits a value.
                           // `sendMessage` handles all the logic of constructing and sending the payload.
@@ -1335,6 +1352,17 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                     exit={{ opacity: 0, y: 30 }} 
                     transition={{ duration: 0.18 }}
                   >
+                    {/* Finalize details helper: show a centered proceed button while keeping free text input */}
+                    {stage === 'finalize_details' && inputSpec?.proceedOption ? (
+                      <div className="flex justify-center mb-3">
+                        <button
+                          onClick={() => sendMessage(inputSpec.proceedOption, 'finalize_details')}
+                          className="px-6 py-2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-md"
+                        >
+                          {inputSpec.proceedOption}
+                        </button>
+                      </div>
+                    ) : null}
                     <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
                       <TextareaAutosize 
                         value={input} 
@@ -1342,7 +1370,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         onKeyPress={handleKey} 
                         minRows={1} 
                         maxRows={6} 
-                        placeholder="Type your message..." 
+                        placeholder={stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...'} 
                         className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" 
                         disabled={isTyping}
                       />

@@ -1,9 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { ensureFirebaseAdmin } from './firebaseAdmin.js';
 
 // Lazy init for Gemini client so dotenv can be loaded before first use.
 let _genAI = null;
-let _model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+let _genAI25 = null;
+let _model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
 function getGenAI() {
   if (_genAI) return _genAI;
   const key = process.env.GEMINI_API_KEY;
@@ -17,6 +19,7 @@ function getGenAI() {
   }
   try {
     _genAI = new GoogleGenerativeAI(key);
+    _genAI25 = new GoogleGenAI({ apiKey: key });
     // refresh model name from env at init time
     _model = process.env.GEMINI_MODEL || _model;
     return _genAI;
@@ -42,8 +45,7 @@ export const STAGES = {
   ask_budget: 'ask_budget',
   // (DNA-related questions removed — captured during onboarding)
   // Final polish
-  must_haves: 'must_haves',
-  must_nots: 'must_nots',
+  finalize_details: 'finalize_details', // combines must_haves and must_nots, with a No, Proceed option or free text
   // Legacy/general
   ask_experience: 'ask_experience',
   ask_preferences: 'ask_preferences',
@@ -61,9 +63,8 @@ const NEXT_STAGE = {
   [STAGES.ask_travelers]: STAGES.ask_pace,
   [STAGES.ask_pace]: STAGES.ask_interests,
   [STAGES.ask_interests]: STAGES.ask_budget,
-  [STAGES.ask_budget]: STAGES.must_haves,
-  [STAGES.must_haves]: STAGES.must_nots,
-  [STAGES.must_nots]: STAGES.generate_suggestions,
+  [STAGES.ask_budget]: STAGES.finalize_details,
+  [STAGES.finalize_details]: STAGES.generate_suggestions,
   [STAGES.generate_suggestions]: STAGES.iterate,
   [STAGES.iterate]: STAGES.iterate,
 };
@@ -80,8 +81,7 @@ const EXPECTED_BEHAVIOR = {
   [STAGES.ask_pace]: 'Ask for preferred pace: Relaxed, Balanced, or Action-Packed. One short sentence.',
   [STAGES.ask_interests]: 'Ask for main interests with a few examples (History, Food, Adventure, Art, Nightlife, Shopping, Relaxation). Allow choosing multiple. One short sentence.',
   [STAGES.ask_budget]: 'Ask budget tier simply: Budget-Friendly, Mid-Range, or Luxury.',
-  [STAGES.must_haves]: 'Ask for any must-see places or must-do activities. One short encouragement.',
-  [STAGES.must_nots]: 'Ask for anything to avoid or constraints (e.g., big crowds, seafood, too much walking).',
+  [STAGES.finalize_details]: 'Briefly ask: Any must-see places or must-avoid constraints? Offer an option: “No, Proceed”. If provided, capture both must_haves and must_nots from text; otherwise allow proceeding.',
   [STAGES.ask_experience]: 'Legacy: short experience question if needed.',
   [STAGES.ask_preferences]: 'Legacy: optional preferences.',
   [STAGES.generate_suggestions]: 'Using all given info, generate conversational recommendations or a simple itinerary summary. No rigid tables, keep paragraphs short. End by offering to refine further.',
@@ -146,6 +146,8 @@ function inputSpecForStage(stage) {
       return { type: 'multiselect', options: ['History & Museums','Food & Local Cuisine','Adventure & Outdoors','Art & Culture','Nightlife & Entertainment','Shopping','Relaxation & Wellness'] };
     case STAGES.ask_budget:
       return { type: 'options', options: ['Budget-Friendly','Mid-Range','Luxury'] };
+    case STAGES.finalize_details:
+      return { type: 'freeText', placeholder: 'Any must-sees or things to avoid? (optional). Or choose: No, Proceed', proceedOption: 'No, Proceed' };
     case STAGES.greeting:
       // Next will be ask_intent which has options
       return { type: 'options', options: ['I have specific locations', 'I only know a region'] };
@@ -180,7 +182,8 @@ function buildStagePrompt({ user, stage, message, state }) {
 async function callGemini({ prompt }) {
   const genAI = getGenAI();
   if (!genAI) throw new Error('Gemini not configured');
-  const model = genAI.getGenerativeModel({ model: _model });
+  // Prefer the 2.5 Pro streaming capable client for generation where applicable
+  const model = genAI.getGenerativeModel({ model: _model || 'gemini-2.5-pro' });
 
   // Retry with exponential backoff for transient server-side errors (503) and rate limits (429).
   const maxRetries = 4;
@@ -208,6 +211,39 @@ async function callGemini({ prompt }) {
       console.warn(`[VoyagerAI] Gemini request failed (status=${statusNum || 'unknown'}). Retrying attempt ${attempt}/${maxRetries} after ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
       continue;
+    }
+  }
+}
+
+// Use Gemini 2.5 Pro streaming to generate full text
+async function callGemini25({ prompt }) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('Gemini not configured');
+  if (!_genAI25) _genAI25 = new GoogleGenAI({ apiKey: key });
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+  const tools = [ { googleSearch: {} } ];
+  const config = { thinkingConfig: { thinkingBudget: -1 }, tools };
+  const contents = [ { role: 'user', parts: [ { text: String(prompt || '') } ] } ];
+  const maxRetries = 3;
+  const baseDelayMs = 700;
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    try {
+      const stream = await _genAI25.models.generateContentStream({ model: modelName, config, contents });
+      let out = '';
+      for await (const chunk of stream) {
+        if (chunk?.text) out += chunk.text;
+      }
+      return out;
+    } catch (err) {
+      const status = err?.status || err?.code || null;
+      const statusNum = typeof status === 'number' ? status : Number(status);
+      const isTransient = statusNum === 429 || statusNum === 503 || (statusNum >= 500 && statusNum < 600);
+      if (attempt >= maxRetries || !isTransient) throw err;
+      const jitter = Math.floor(Math.random() * 200);
+      const delay = Math.round(baseDelayMs * Math.pow(2, attempt - 1)) + jitter;
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 }
@@ -271,7 +307,7 @@ export async function generateItinerary(payload) {
     };
   }
   const prompt = PROMPTS.itinerary(payload);
-  const text = await callGemini({ prompt });
+  const text = await callGemini25({ prompt });
   const json = tryParseJson(text);
   if (!json) throw new Error('Gemini itinerary parsing failed');
   return json;
@@ -291,7 +327,7 @@ export async function generateItineraryMarkdown({ user = null, state = {}, trave
     return `${title}\n${body}`;
   }
   const prompt = markdownItineraryPrompt({ user, travelProfile, tripState: state });
-  const text = await callGemini({ prompt });
+  const text = await callGemini25({ prompt });
   // Return raw Markdown text; if model returned fenced code, strip once
   const cleaned = (text || '').replace(/^```(markdown)?/i, '').replace(/```$/i, '').trim();
   if (!cleaned) throw new Error('Gemini returned empty markdown');
@@ -300,6 +336,13 @@ export async function generateItineraryMarkdown({ user = null, state = {}, trave
 
 // Stage-based chat
 export async function generateChat({ stage = STAGES.greeting, message = '', user = null, state = {} }) {
+  // Back-compat: coerce any legacy stages to the new combined stage
+  try {
+    const s = String(stage || '').toLowerCase();
+    if (s === 'must_haves' || s === 'must-nots' || s === 'must_nots') {
+      stage = STAGES.finalize_details;
+    }
+  } catch {}
   let quickOptions;
   // Debug: log incoming chat request
   try { console.log('[VoyagerAI] generateChat received:', { stage, message: String(message).slice(0, 200), user: user ? { uid: user.uid } : null, stateKeys: Object.keys(state || {}) }); } catch (e) {}
@@ -320,9 +363,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
       [STAGES.ask_travelers]: 'Who is traveling? Solo, Couple, Family, or a Group of Friends?',
       [STAGES.ask_pace]: 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?',
       [STAGES.ask_interests]: 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)',
-      [STAGES.ask_budget]: 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?',
-      [STAGES.must_haves]: 'Any must-see places or must-do activities?',
-      [STAGES.must_nots]: 'Anything you’d like to avoid? (e.g., big crowds, seafood, too much walking)',
+  [STAGES.ask_budget]: 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?',
+  [STAGES.finalize_details]: 'Any must-see places or constraints to avoid? You can type them, or choose "No, Proceed".',
       [STAGES.generate_suggestions]: 'I’ll generate a concise plan based on your details. Would you like me to proceed?',
       [STAGES.iterate]: 'Tell me if you want more options, or to focus on a theme or adjust the plan.',
     };
@@ -332,6 +374,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   let stageNext = NEXT_STAGE[stage] || null;
   let hints = undefined;
   let suggestions = undefined;
+  // Accumulate state changes to echo back to client for sync
+  const stateDelta = {};
   
   // 🔧 Handle stage transitions based on user input
   // For ask_intent stage, determine next stage based on user's choice
@@ -359,6 +403,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
             .map(s => s.trim())
             .filter(Boolean);
       if (locations.length) {
+        if (stage === STAGES.input_locations) stateDelta.locations = locations;
         const sug = await generateSuggestion({ destinations: locations });
         hints = { recommended_days: sug.recommended_days, best_months: sug.best_months, estimated_budget: sug.estimated_budget };
       }
@@ -368,6 +413,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   const providedLocations = stage === STAGES.input_locations && ((state?.locations && state.locations.length) || message?.trim());
   const providedRegion = stage === STAGES.input_region && ((state?.region) || message?.trim());
   if (providedLocations || providedRegion) {
+    if (stage === STAGES.input_region) stateDelta.region = String(message || '').trim();
     const hintDays = hints?.recommended_days ? ` Suggested: ${hints.recommended_days}.` : '';
     text = `Great, noted.${hintDays} How many days do you plan to travel?`;
   }
@@ -408,10 +454,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
         return 'What are your main interests? (Select all that apply)';
       case STAGES.ask_budget:
         return 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?';
-      case STAGES.must_haves:
-        return 'Any must-see places or must-do activities?';
-      case STAGES.must_nots:
-        return 'Anything you’d like to avoid? (e.g., big crowds, seafood, too much walking)';
+      case STAGES.finalize_details:
+        return 'Any must-see places or constraints to avoid? You can type them, or choose "No, Proceed".';
       case STAGES.generate_suggestions:
         return 'I’ll generate a concise plan based on your details. Would you like me to proceed?';
       default:
@@ -448,20 +492,42 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   }
 
   const hasBudget = stage === STAGES.ask_budget && ((state?.budget) || /(budget|mid|luxury)/i.test(String(message||'')));
-  if (hasBudget) text = nextPromptFor(STAGES.must_haves);
+  if (hasBudget) {
+    text = nextPromptFor(STAGES.finalize_details);
+    stageNext = STAGES.finalize_details;
+  }
 
-  const hasMustHaves = stage === STAGES.must_haves && ((state?.must_haves) || String(message||'').trim());
-  if (hasMustHaves) text = nextPromptFor(STAGES.must_nots);
-
-  const hasMustNots = stage === STAGES.must_nots && ((state?.must_nots) || String(message||'').trim());
-  if (hasMustNots) text = nextPromptFor(STAGES.generate_suggestions);
+  if (stage === STAGES.finalize_details) {
+    const msg = String(message || '').trim();
+    if (/^no[, ]?proceed$/i.test(msg) || /^no$/i.test(msg)) {
+      text = nextPromptFor(STAGES.generate_suggestions);
+      stageNext = STAGES.generate_suggestions;
+    } else if (msg) {
+      // Simple parse: split into must_haves/must_nots by keywords
+      const lower = msg.toLowerCase();
+      const hasAvoid = /(avoid|no\s|don\'t|dont)/.test(lower);
+      const parts = msg.split(/[.;\n]/).map(s=>s.trim()).filter(Boolean);
+      const must_haves = parts.filter(p => !/(avoid|no\s|don\'t|dont)/i.test(p));
+      const must_nots = parts.filter(p => /(avoid|no\s|don\'t|dont)/i.test(p));
+      state.must_haves = Array.from(new Set([...(state.must_haves||[]), ...must_haves])).filter(Boolean);
+      state.must_nots = Array.from(new Set([...(state.must_nots||[]), ...must_nots])).filter(Boolean);
+  stateDelta.must_haves = state.must_haves;
+  stateDelta.must_nots = state.must_nots;
+      text = nextPromptFor(STAGES.generate_suggestions);
+      stageNext = STAGES.generate_suggestions;
+    } else {
+      // No input yet — keep the same prompt
+      text = nextPromptFor(STAGES.finalize_details);
+      stageNext = STAGES.finalize_details;
+    }
+  }
   // Normalize next stage and input spec (frontend should always receive an input object)
   const resolvedStageNext = stageNext || stage;
-    let forceInput = null;
-    if (stage === STAGES.generate_suggestions) {
-      forceInput = { type: 'options', options: ['Generate itinerary'] };
-    }
-    const input = forceInput || inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
+  let forceInput = null;
+  if (resolvedStageNext === STAGES.generate_suggestions || stage === STAGES.generate_suggestions) {
+    forceInput = { type: 'options', options: ['Generate itinerary'] };
+  }
+  const input = forceInput || inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
 
   // Ensure frontend always receives an array (possibly empty) instead of undefined.
   quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
@@ -472,7 +538,13 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
     quickOptions = ['Generate itinerary'];
     const wantsGenerate = /\b(generate|create|proceed|yes)\b/i.test(String(message || ''));
     const hasCore = (state?.locations?.length || state?.region) && (state?.durationDays || (state?.startDate && state?.endDate));
-    if (wantsGenerate || hasCore) {
+    if (!hasCore && wantsGenerate) {
+      // Guard: require region/locations and basic dates/duration before generation
+      text = 'Before I generate, please share a region or at least one location, and your travel dates or duration.';
+      stageNext = !state?.region && !(state?.locations?.length)
+        ? STAGES.input_region
+        : (!state?.durationDays && !(state?.startDate && state?.endDate) ? STAGES.ask_dates : STAGES.ask_dates);
+    } else if (wantsGenerate || hasCore) {
       try {
         // Try to include the user's saved travelProfile (DNA) from Firestore
         let travelProfile = {};
@@ -484,7 +556,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
           }
         } catch (e) { /* ignore */ }
         // Generate both markdown and JSON so UI can present cards
-        const [md, jsonPlan] = await Promise.all([
+  const [md, jsonPlan] = await Promise.all([
           generateItineraryMarkdown({ user, state, travelProfile }),
           generateItinerary({ ...state, user })
         ]);
@@ -533,6 +605,19 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
           // Use a local variable to capture and include in final response
           // eslint-disable-next-line no-var
           var itineraryItems = items;
+          // Also expose the context used for generation for debugging/verification
+          // eslint-disable-next-line no-var
+          var contextUsed = {
+            locations: state.locations || [],
+            region: state.region || '',
+            durationDays: state.durationDays || null,
+            startDate: state.startDate || null,
+            endDate: state.endDate || null,
+            travelers: state.travelers || null,
+            pace: (travelProfile.pace || state.pace) || null,
+            budget: (travelProfile.budget || state.budget) || null,
+            interests: (travelProfile.interests || state.interests) || [],
+          };
         } catch {}
       } catch (e) {
         // Fall back to a concise confirmation prompt
@@ -557,9 +642,12 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   }
 
   const resp = { reply, stageNext: finalStageNext, input, quickOptions, hints };
+  // Include any state deltas so the client can sync its flowState without guessing
+  if (stateDelta && Object.keys(stateDelta).length) resp.state = stateDelta;
   // Include optional itineraryItems when present (from generation stage)
   try { if (typeof itineraryItems !== 'undefined' && Array.isArray(itineraryItems)) resp.itineraryItems = itineraryItems; } catch {}
   if (Array.isArray(suggestions) && suggestions.length) resp.suggestions = suggestions;
+  try { if (typeof contextUsed !== 'undefined') resp.contextUsed = contextUsed; } catch {}
   try { console.log('[VoyagerAI] generateChat responding:', { replyPreview: String(reply).slice(0,200), stageNext: finalStageNext, inputType: input?.type, hints }); } catch (e) {}
   return resp;
 }

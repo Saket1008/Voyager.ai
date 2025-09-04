@@ -15,6 +15,7 @@ router.post('/', async (req, res) => {
     const data = await generateChat({ message, stage: stageSafe, user: user || null, state: state || {} });
 
   // Always respond with JSON; the frontend renderer decides how to display (markdown, cards, etc.)
+  // Note: service now may include itineraryItems and combined finalize_details stage.
   return res.json(data);
   } catch (err) {
     console.error('chat route error', err);
