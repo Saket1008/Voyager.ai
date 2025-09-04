@@ -130,7 +130,7 @@ function inputSpecForStage(stage) {
     case STAGES.ask_travelers:
       return { type: 'options', options: ['Solo Traveler', 'A Couple', 'Family', 'A Group of Friends'] };
     case STAGES.ask_pace:
-      return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] };
+      return { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed', 'Fixed Schedule'] };
     case STAGES.ask_interests:
       return { type: 'multiselect', options: ['History & Museums','Food & Local Cuisine','Adventure & Outdoors','Art & Culture','Nightlife & Entertainment','Shopping','Relaxation & Wellness'] };
     case STAGES.ask_budget:
@@ -321,6 +321,23 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   let stageNext = NEXT_STAGE[stage] || null;
   let hints = undefined;
   let suggestions = undefined;
+  
+  // 🔧 Handle stage transitions based on user input
+  // For ask_intent stage, determine next stage based on user's choice
+  if (stage === STAGES.ask_intent && message) {
+    const userChoice = String(message || '').toLowerCase();
+    if (userChoice.includes('specific locations') || userChoice.includes('specific location')) {
+      stageNext = STAGES.input_locations;
+      text = 'Great! Please tell me the specific places you want to visit (you can list multiple locations).';
+    } else if (userChoice.includes('region') || userChoice.includes('only know a region')) {
+      stageNext = STAGES.input_region;
+      text = 'Perfect! Please tell me which region or area you\'re interested in exploring.';
+    }
+    // If we couldn't determine the choice, stay in ask_intent
+    if (!stageNext) {
+      stageNext = STAGES.ask_intent;
+    }
+  }
   // After locations/region are provided, fetch helpful hints (days, best months)
   if ((stage === STAGES.input_locations || stage === STAGES.input_region) && (state?.locations?.length || message)) {
     try {
@@ -401,7 +418,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   const hasTravelers = stage === STAGES.ask_travelers && ((state?.travelers) || /(solo|couple|family|friends)/i.test(String(message||'')));
   if (hasTravelers) text = nextPromptFor(STAGES.ask_pace);
 
-  const hasPace = stage === STAGES.ask_pace && ((state?.pace) || /(relaxed|balanced|action)/i.test(String(message||'')));
+  const hasPace = stage === STAGES.ask_pace && ((state?.pace) || /(relaxed|balanced|action|fixed)/i.test(String(message||'')));
   if (hasPace) text = nextPromptFor(STAGES.ask_interests);
 
   const hasInterests = stage === STAGES.ask_interests && ((Array.isArray(state?.interests) && state.interests.length) || /,/.test(String(message||'')));
