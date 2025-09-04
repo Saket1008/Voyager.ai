@@ -289,6 +289,7 @@ export async function generateItineraryMarkdown({ user = null, state = {}, trave
 
 // Stage-based chat
 export async function generateChat({ stage = STAGES.greeting, message = '', user = null, state = {} }) {
+  let quickOptions;
   // Debug: log incoming chat request
   try { console.log('[VoyagerAI] generateChat received:', { stage, message: String(message).slice(0, 200), user: user ? { uid: user.uid } : null, stateKeys: Object.keys(state || {}) }); } catch (e) {}
   const prompt = buildStagePrompt({ user, stage, message, state });
@@ -418,9 +419,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   const resolvedStageNext = stageNext || stage;
   const input = inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
 
-  // quickOptions may have been set above (e.g., generation stage). If not, derive from input spec.
   // Ensure frontend always receives an array (possibly empty) instead of undefined.
-  let quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
+  quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
 
   // If we're at the generation stage, allow immediate itinerary generation in Markdown
   if (stage === STAGES.generate_suggestions) {
