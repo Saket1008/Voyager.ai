@@ -53,6 +53,9 @@ export const STAGES = {
   iterate: 'iterate',
 };
 
+// Feature flag: whether to use Gemini for per-turn chat prompts (default: false to save cost)
+const USE_GEMINI_CHAT = String(process.env.USE_GEMINI_CHAT || '').toLowerCase() === 'true';
+
 const NEXT_STAGE = {
   [STAGES.greeting]: STAGES.ask_intent,
   [STAGES.ask_intent]: null, // Client chooses: input_locations or input_region
@@ -88,10 +91,56 @@ const EXPECTED_BEHAVIOR = {
   [STAGES.iterate]: 'Acknowledge refinement requests such as “show more options”, “focus on X”, or “adjust for budget/time”. Provide updated, concise suggestions and ask if further tweaks are needed.',
 };
 
+// Short, user-facing default texts for local chat (no Gemini call per turn)
+const DEFAULT_STAGE_TEXTS = {
+  [STAGES.greeting]: "Hello! I'm your Voyager.AI assistant. Do you already have a specific list of locations in mind, or only a region?",
+  [STAGES.ask_intent]: 'Would you like to provide specific locations or a general region?',
+  [STAGES.input_locations]: 'Please type the names of the locations you want to explore (comma separated).',
+  [STAGES.input_region]: 'Please type the region or area you’re interested in.',
+  [STAGES.ask_duration]: 'How many days do you plan to travel?',
+  [STAGES.ask_dates]: 'Pick a start date. I’ll auto-calculate the return date from your days.',
+  [STAGES.ask_travelers]: 'Who is traveling? Solo, Couple, Family, or a Group of Friends?',
+  [STAGES.ask_pace]: 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?',
+  [STAGES.ask_interests]: 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)',
+  [STAGES.ask_budget]: 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?',
+  [STAGES.finalize_details]: 'Any must-see places or constraints to avoid? You can type them, or choose "No, Proceed".',
+  [STAGES.generate_suggestions]: 'I’ll generate a concise plan based on your details. Would you like me to proceed?',
+  [STAGES.iterate]: 'Tell me if you want more options, or to focus on a theme or adjust the plan.',
+};
+
 export const PROMPTS = {
   suggestion: ({ destinations }) => `You are Voyager AI. Based on the selected places, suggest days, best travel months, and a budget band for a decent trip from India.\n\nDestinations: ${destinations.join(', ')}\n\nReturn ONLY valid JSON like:\n{\n  "recommended_days": "8-10",\n  "best_months": "April–June",\n  "estimated_budget": "₹1.8L – ₹2.4L for 2 adults"\n}`,
   itinerary: (payload) => `You are Voyager AI, an expert travel planner.\nThe user is vegetarian (Jain-friendly). Plan respectfully.\nReturn structured JSON exactly as the schema describes. No prose outside JSON.\n\nUser Inputs:\n${JSON.stringify(payload, null, 2)}\n\nSchema:\n{\n  "summary": {\n    "recommended_days": "string",\n    "best_months": "string",\n    "estimated_budget": "string",\n    "key_tips": ["string"]\n  },\n  "flights": [ { "from": "string", "to": "string", "date": "YYYY-MM-DD", "airline": "string" } ],\n  "hotels": [ { "city": "string", "name": "string", "checkIn": "YYYY-MM-DD", "checkOut": "YYYY-MM-DD" } ],\n  "daily_plan": [ { "day": "number", "city": "string", "activities": ["string"] } ],\n  "transport": ["string"],\n  "notes": ["string"]\n}`,
 };
+
+// ------------------ Local fallbacks (for rate limits or errors) ------------------
+function fallbackItineraryJSON(state = {}) {
+  const days = state.durationDays || 3;
+  const locs = Array.isArray(state.locations) && state.locations.length ? state.locations : (state.region ? [state.region] : ['Your Destination']);
+  const bestMonths = 'April–June';
+  return {
+    summary: {
+      recommended_days: `${days}-${Math.max(days, days + 2)}`,
+      best_months: bestMonths,
+      estimated_budget: state.budget ? String(state.budget) : '—',
+      key_tips: ['This is a quick fallback itinerary generated locally due to API rate limits.'],
+    },
+    flights: [],
+    hotels: [],
+    daily_plan: locs.slice(0, 3).map((city, i) => ({ day: i + 1, city, activities: [`Arrive in ${city} and explore the highlights`, 'Try a popular local spot for dinner'] })),
+    transport: ['Use local transit or rideshare between sights.'],
+    notes: ['Regenerate later for a richer, AI-detailed plan when API limit resets.'],
+  };
+}
+
+function fallbackItineraryMarkdown(state = {}) {
+  const titleBits = [];
+  if (Array.isArray(state.locations) && state.locations.length) titleBits.push(state.locations.join(', '));
+  if (state.region) titleBits.push(state.region);
+  const title = `# Your Quick Itinerary${titleBits.length ? ' — ' + titleBits.join(' · ') : ''}`;
+  const daysLine = state.durationDays ? `- Duration: ${state.durationDays} days\n` : '';
+  return `${title}\n\nThis fast itinerary was generated locally because the AI is currently rate-limited. You'll still get a sensible outline based on your inputs. Try again in ~1 minute for a fully detailed AI plan.\n\n- Travelers: ${state.travelers || '—'}\n- Pace: ${state.pace || '—'}\n- Budget: ${state.budget || '—'}\n${daysLine}\n### Day-by-Day (Outline)\n- Day 1: Arrive, settle in, and explore nearby highlights.\n- Day 2: Signature sights, great local eats, and a hidden gem.\n- Day 3: Flex day for your interests (food, history, art, or nature).\n\n### Practical Notes\n- You can refine dates, pace, or focus, then regenerate for AI-detailed steps.\n`;
+}
 
 // Master Markdown itinerary prompt
 function markdownItineraryPrompt({ user, travelProfile = {}, tripState = {} }) {
@@ -291,26 +340,18 @@ export async function generateItinerary(payload) {
   const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] generateItinerary: Gemini not configured — returning simple fallback itinerary.');
-    // Minimal fallback itinerary JSON to keep callers robust during dev
-    return {
-      summary: {
-        recommended_days: '3-5',
-        best_months: 'April–June',
-        estimated_budget: '₹0.6L – ₹1.2L for 2 adults',
-        key_tips: ['Fallback itinerary: Gemini not configured'],
-      },
-      flights: [],
-      hotels: [],
-      daily_plan: [],
-      transport: [],
-      notes: ['Detailed itinerary generation requires GEMINI_API_KEY.'],
-    };
+    return fallbackItineraryJSON(payload || {});
   }
   const prompt = PROMPTS.itinerary(payload);
-  const text = await callGemini25({ prompt });
-  const json = tryParseJson(text);
-  if (!json) throw new Error('Gemini itinerary parsing failed');
-  return json;
+  try {
+    const text = await callGemini25({ prompt });
+    const json = tryParseJson(text);
+    if (!json) throw new Error('Gemini itinerary parsing failed');
+    return json;
+  } catch (e) {
+    console.warn('[VoyagerAI] generateItinerary: falling back due to error:', e?.status || e?.message || e);
+    return fallbackItineraryJSON(payload || {});
+  }
 }
 
 export async function generateItineraryMarkdown({ user = null, state = {}, travelProfile = {} }) {
@@ -318,20 +359,18 @@ export async function generateItineraryMarkdown({ user = null, state = {}, trave
   const genAI = getGenAI();
   if (!genAI) {
     console.warn('[VoyagerAI] generateItineraryMarkdown: Gemini not configured — returning markdown fallback.');
-    const parts = [];
-    if (Array.isArray(state.locations) && state.locations.length) parts.push(`Destinations: ${state.locations.join(', ')}`);
-    if (state.region) parts.push(`Region: ${state.region}`);
-    if (state.durationDays) parts.push(`Duration: ${state.durationDays} days`);
-    const title = `# Your Quick Itinerary${parts.length ? ' — ' + parts.join(' · ') : ''}`;
-    const body = `\n\nThis is a fallback itinerary generated locally because the Gemini API key is not configured. For a richer, day-by-day plan, set GEMINI_API_KEY in your server environment.\n\n- Overview: A short suggested trip based on provided inputs.\n- Suggestion: Keep flexible.\n\n### Practical Notes\n- Gemini not configured — replace with real itinerary when available.\n`;
-    return `${title}\n${body}`;
+    return fallbackItineraryMarkdown(state || {});
   }
   const prompt = markdownItineraryPrompt({ user, travelProfile, tripState: state });
-  const text = await callGemini25({ prompt });
-  // Return raw Markdown text; if model returned fenced code, strip once
-  const cleaned = (text || '').replace(/^```(markdown)?/i, '').replace(/```$/i, '').trim();
-  if (!cleaned) throw new Error('Gemini returned empty markdown');
-  return cleaned;
+  try {
+    const text = await callGemini25({ prompt });
+    const cleaned = (text || '').replace(/^```(markdown)?/i, '').replace(/```$/i, '').trim();
+    if (!cleaned) throw new Error('Gemini returned empty markdown');
+    return cleaned;
+  } catch (e) {
+    console.warn('[VoyagerAI] generateItineraryMarkdown: falling back due to error:', e?.status || e?.message || e);
+    return fallbackItineraryMarkdown(state || {});
+  }
 }
 
 // Stage-based chat
@@ -346,30 +385,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
   let quickOptions;
   // Debug: log incoming chat request
   try { console.log('[VoyagerAI] generateChat received:', { stage, message: String(message).slice(0, 200), user: user ? { uid: user.uid } : null, stateKeys: Object.keys(state || {}) }); } catch (e) {}
-  const prompt = buildStagePrompt({ user, stage, message, state });
-  let text = '';
-  try {
-    text = await callGemini({ prompt });
-  } catch (err) {
-    console.error('Gemini chat error', err);
-    // Friendly default per stage
-    const defaults = {
-      [STAGES.greeting]: "Hello! I'm your Voyager.AI assistant. Do you already have a specific list of locations in mind, or only a region?",
-      [STAGES.ask_intent]: 'Would you like to provide specific locations or a general region?',
-      [STAGES.input_locations]: 'Please type the names of the locations you want to explore (comma separated).',
-      [STAGES.input_region]: 'Please type the region or area you’re interested in.',
-      [STAGES.ask_duration]: 'How many days do you plan to travel?',
-      [STAGES.ask_dates]: 'Pick a start date. I’ll auto-calculate the return date from your days.',
-      [STAGES.ask_travelers]: 'Who is traveling? Solo, Couple, Family, or a Group of Friends?',
-      [STAGES.ask_pace]: 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?',
-      [STAGES.ask_interests]: 'What are your main interests? (e.g., History, Food, Adventure, Art, Nightlife, Shopping, Relaxation)',
-  [STAGES.ask_budget]: 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?',
-  [STAGES.finalize_details]: 'Any must-see places or constraints to avoid? You can type them, or choose "No, Proceed".',
-      [STAGES.generate_suggestions]: 'I’ll generate a concise plan based on your details. Would you like me to proceed?',
-      [STAGES.iterate]: 'Tell me if you want more options, or to focus on a theme or adjust the plan.',
-    };
-    text = defaults[stage] || 'Let’s continue. Please provide the next detail.';
-  }
+  // Per-turn chat: run locally to cut latency and cost; use Gemini only for location suggestion + final itinerary
+  let text = DEFAULT_STAGE_TEXTS[stage] || 'Let’s continue. Please provide the next detail.';
   // Prepare response shape and dynamic hints
   let stageNext = NEXT_STAGE[stage] || null;
   let hints = undefined;
@@ -393,7 +410,7 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
       stageNext = STAGES.ask_intent;
     }
   }
-  // After locations/region are provided, fetch helpful hints (days, best months)
+  // After locations/region are provided, fetch helpful hints (days, best months) — this is the only mid-flow Gemini call
   if ((stage === STAGES.input_locations || stage === STAGES.input_region) && (state?.locations?.length || message)) {
     try {
       const locations = Array.isArray(state?.locations) && state.locations.length
@@ -441,26 +458,11 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
 
   // Helper to produce the next prompt succinctly
   function nextPromptFor(next) {
-    switch (next) {
-      case STAGES.ask_dates: {
-        const best = hints?.best_months ? ` Best months: ${hints.best_months}.` : '';
-        return `Pick a start date. I’ll auto-calculate the return date from your days.${best}`;
-      }
-      case STAGES.ask_travelers:
-        return 'Who is traveling? Solo, Couple, Family, or a Group of Friends?';
-      case STAGES.ask_pace:
-        return 'What pace would you prefer: Relaxed, Balanced, or Action-Packed?';
-      case STAGES.ask_interests:
-        return 'What are your main interests? (Select all that apply)';
-      case STAGES.ask_budget:
-        return 'What budget tier should I plan for: Budget-Friendly, Mid-Range, or Luxury?';
-      case STAGES.finalize_details:
-        return 'Any must-see places or constraints to avoid? You can type them, or choose "No, Proceed".';
-      case STAGES.generate_suggestions:
-        return 'I’ll generate a concise plan based on your details. Would you like me to proceed?';
-      default:
-        return EXPECTED_BEHAVIOR[next] || 'Let’s continue.';
+    if (next === STAGES.ask_dates) {
+      const best = hints?.best_months ? ` Best months: ${hints.best_months}.` : '';
+      return `${DEFAULT_STAGE_TEXTS[STAGES.ask_dates]}${best}`;
     }
+    return DEFAULT_STAGE_TEXTS[next] || 'Let’s continue.';
   }
 
   // If the current stage input is already in state/message, advance the question to the next stage instead of repeating
@@ -521,29 +523,61 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
       stageNext = STAGES.finalize_details;
     }
   }
-  // Normalize next stage and input spec (frontend should always receive an input object)
-  const resolvedStageNext = stageNext || stage;
-  let forceInput = null;
-  if (resolvedStageNext === STAGES.generate_suggestions || stage === STAGES.generate_suggestions) {
-    forceInput = { type: 'options', options: ['Generate itinerary'] };
-  }
-  const input = forceInput || inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
-
-  // Ensure frontend always receives an array (possibly empty) instead of undefined.
-  quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
-
-  // If we're at the generation stage, allow immediate itinerary generation in Markdown
-  if (stage === STAGES.generate_suggestions) {
+  // If we're at the generation stage (or user triggers from iterate), allow immediate itinerary generation in Markdown
+  if (stage === STAGES.generate_suggestions || stage === STAGES.iterate) {
     // Offer a one-tap option
     quickOptions = ['Generate itinerary'];
     const wantsGenerate = /\b(generate|create|proceed|yes)\b/i.test(String(message || ''));
     const hasCore = (state?.locations?.length || state?.region) && (state?.durationDays || (state?.startDate && state?.endDate));
     if (!hasCore && wantsGenerate) {
-      // Guard: require region/locations and basic dates/duration before generation
-      text = 'Before I generate, please share a region or at least one location, and your travel dates or duration.';
-      stageNext = !state?.region && !(state?.locations?.length)
-        ? STAGES.input_region
-        : (!state?.durationDays && !(state?.startDate && state?.endDate) ? STAGES.ask_dates : STAGES.ask_dates);
+      // Best-effort graceful path: show a quick outline now, then jump to the first missing detail
+      const jsonPlan = fallbackItineraryJSON(state || {});
+      text = fallbackItineraryMarkdown(state || {});
+      // Decide which missing detail to collect next
+      const needRegionOrLocations = !state?.region && !(state?.locations?.length);
+      const needDatesOrDuration = !state?.durationDays && !(state?.startDate && state?.endDate);
+      stageNext = needRegionOrLocations ? STAGES.input_region : (needDatesOrDuration ? STAGES.ask_dates : STAGES.iterate);
+      // Build lightweight cards and contextUsed for UI
+      try {
+        const items = [];
+        if (jsonPlan?.summary) {
+          items.push({
+            type: 'info',
+            title: 'Trip Overview',
+            description: `Days: ${jsonPlan.summary.recommended_days || state.durationDays || ''}  |  Best months: ${jsonPlan.summary.best_months || '—'}  |  Est. budget: ${jsonPlan.summary.estimated_budget || '—'}`.trim()
+          });
+        }
+        if (Array.isArray(jsonPlan?.daily_plan)) {
+          for (const day of jsonPlan.daily_plan) {
+            const dayLabel = typeof day.day !== 'undefined' ? `Day ${day.day}` : 'Day';
+            const city = day.city ? ` — ${day.city}` : '';
+            items.push({ type: 'info', title: `${dayLabel}${city}` });
+            if (Array.isArray(day.activities)) {
+              for (const act of day.activities) {
+                const t = typeof act === 'string' ? act : (act?.title || act?.name || 'Activity');
+                const desc = typeof act === 'string' ? '' : (act?.description || '');
+                const time = act?.time || '';
+                items.push({ type: 'activity', title: t, description: desc, time });
+              }
+            }
+          }
+        }
+        // eslint-disable-next-line no-var
+        var itineraryItems = items;
+        // eslint-disable-next-line no-var
+        var contextUsed = {
+          locations: state.locations || [],
+          region: state.region || '',
+          durationDays: state.durationDays || null,
+          startDate: state.startDate || null,
+          endDate: state.endDate || null,
+          travelers: state.travelers || null,
+          pace: state.pace || null,
+          budget: state.budget || null,
+          interests: state.interests || [],
+          note: 'Fallback outline shown first; collecting missing details next',
+        };
+      } catch {}
     } else if (wantsGenerate || hasCore) {
       try {
         // Try to include the user's saved travelProfile (DNA) from Firestore
@@ -555,8 +589,8 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
             if (doc.exists) travelProfile = doc.data().travelProfile || {};
           }
         } catch (e) { /* ignore */ }
-        // Generate both markdown and JSON so UI can present cards
-  const [md, jsonPlan] = await Promise.all([
+        // Generate both markdown and JSON so UI can present cards (with graceful fallbacks inside)
+        const [md, jsonPlan] = await Promise.all([
           generateItineraryMarkdown({ user, state, travelProfile }),
           generateItinerary({ ...state, user })
         ]);
@@ -620,13 +654,69 @@ export async function generateChat({ stage = STAGES.greeting, message = '', user
           };
         } catch {}
       } catch (e) {
-        // Fall back to a concise confirmation prompt
-        text = text || 'I can generate your detailed itinerary now. Shall I proceed?';
+        // Graceful fallback: provide an immediate local outline to avoid dead-end prompts
+        const jsonPlan = fallbackItineraryJSON(state || {});
+        text = fallbackItineraryMarkdown(state || {});
+        stageNext = STAGES.iterate;
+        // Provide refine options even on fallback
+        quickOptions = ['Change dates', 'Adjust pace', 'Focus on food', 'Add hidden gems'];
+        // Attach lightweight cards from fallback
+        try {
+          const items = [];
+          if (jsonPlan?.summary) {
+            items.push({
+              type: 'info',
+              title: 'Trip Overview',
+              description: `Days: ${jsonPlan.summary.recommended_days || state.durationDays || ''}  |  Best months: ${jsonPlan.summary.best_months || '—'}  |  Est. budget: ${jsonPlan.summary.estimated_budget || '—'}`.trim()
+            });
+          }
+          if (Array.isArray(jsonPlan?.daily_plan)) {
+            for (const day of jsonPlan.daily_plan) {
+              const dayLabel = typeof day.day !== 'undefined' ? `Day ${day.day}` : 'Day';
+              const city = day.city ? ` — ${day.city}` : '';
+              items.push({ type: 'info', title: `${dayLabel}${city}` });
+              if (Array.isArray(day.activities)) {
+                for (const act of day.activities) {
+                  const t = typeof act === 'string' ? act : (act?.title || act?.name || 'Activity');
+                  const desc = typeof act === 'string' ? '' : (act?.description || '');
+                  const time = act?.time || '';
+                  items.push({ type: 'activity', title: t, description: desc, time });
+                }
+              }
+            }
+          }
+          // eslint-disable-next-line no-var
+          var itineraryItems = items;
+          // eslint-disable-next-line no-var
+          var contextUsed = {
+            locations: state.locations || [],
+            region: state.region || '',
+            durationDays: state.durationDays || null,
+            startDate: state.startDate || null,
+            endDate: state.endDate || null,
+            travelers: state.travelers || null,
+            pace: state.pace || null,
+            budget: state.budget || null,
+            interests: state.interests || [],
+            note: 'Fallback used due to AI rate limit or error',
+          };
+        } catch {}
       }
     } else {
       text = text || 'I can generate your detailed itinerary now. Shall I proceed?';
     }
   }
+
+  // Normalize next stage and input spec (frontend should always receive an input object)
+  const resolvedStageNext = stageNext || stage;
+  let forceInput = null;
+  if (resolvedStageNext === STAGES.generate_suggestions || resolvedStageNext === STAGES.iterate) {
+    forceInput = { type: 'options', options: ['Generate itinerary'] };
+  }
+  const input = forceInput || inputSpecForStage(resolvedStageNext) || { type: 'freeText' };
+
+  // Ensure frontend always receives an array (possibly empty) instead of undefined.
+  quickOptions = Array.isArray(quickOptions) ? quickOptions : undefined;
 
   // Final normalization: make sure reply, stageNext, input, quickOptions, hints are always present.
   const reply = (text && String(text).trim().length) ? text : 'Let\'s continue.';

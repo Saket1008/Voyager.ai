@@ -246,7 +246,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
       return 'grid-cols-2 md:grid-cols-3';
     })();
 
-  const centerSingle = stage === 'generate_suggestions' && opts.length === 1;
+  const centerSingle = (stage === 'generate_suggestions' || stage === 'iterate') && opts.length === 1;
     return (
       <div className="space-y-4">
         <div className={`${centerSingle ? 'grid grid-cols-1 place-items-center' : `grid ${gridCols}`} gap-4`}>
@@ -736,6 +736,8 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
   const isUser = message.role === 'user';
   const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white shadow-inner';
   const userCls = 'ml-auto inline-block max-w-[70%] rounded-[18px] px-4 py-3 text-sm font-medium text-white bg-gradient-to-br from-[#16a34a] to-[#10b981] border border-white/10 shadow-inner';
+  const [showThinking, setShowThinking] = React.useState(false);
+  const hasThinking = !!message?.contextUsed;
 
   return (
     <div className={`flex items-start gap-4 my-6 ${isUser ? 'justify-end' : ''}`}>
@@ -761,7 +763,22 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
               <button onClick={() => onCopy(String(message.content ?? ''))} title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <Copy className="w-4 h-4" />
               </button>
+              {hasThinking && (
+                <button
+                  onClick={() => setShowThinking(v => !v)}
+                  title={showThinking ? 'Hide thinking' : 'Show thinking'}
+                  className="h-8 rounded-md px-2 bg-white/6 border border-white/10 text-white/90 hover:bg-white/10 flex items-center gap-1 text-xs"
+                >
+                  <Lightbulb className="w-4 h-4" /> {showThinking ? 'Hide' : 'Thinking'}
+                </button>
+              )}
             </div>
+            {hasThinking && showThinking && (
+              <div className="mt-3 rounded-xl bg-black/40 border border-white/10 p-3 text-xs text-white/80">
+                <div className="mb-1 font-medium text-white/90">Context used</div>
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 opacity-90">{JSON.stringify(message.contextUsed, null, 2)}</pre>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -851,6 +868,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   }, [activeChat?.messages.length, isTyping]);
 
   const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+ 
 
   const pushMessage = (chatId, role, content) => {
     const makeMsg = (role, content) => {
@@ -996,6 +1014,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         currentStage: data?.stageNext || stage,
         nextStage: data?.stageNext,
         hints: data?.hints,
+  contextUsed: data?.contextUsed,
       };
 
       pushMessage(chatId, 'assistant', assistantMsg);
