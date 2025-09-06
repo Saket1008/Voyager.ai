@@ -1,22 +1,25 @@
+// server/src/routes/suggest.js
+
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth.js';
+import { mustBeAuthed } from '../middleware/auth.js';
 import { generateSuggestion } from '../services/ai.js';
 
 const router = Router();
-router.use(authMiddleware);
+router.use(mustBeAuthed);
 
-// POST /api/suggest  { destinations: ["Germany","France"] }
 router.post('/', async (req, res) => {
   try {
-    const { destinations } = req.body || {};
-    if (!Array.isArray(destinations) || destinations.length === 0) {
-      return res.status(400).json({ error: 'destinations array required' });
+    const { destinations } = req.body;
+    if (!destinations || !Array.isArray(destinations) || destinations.length === 0) {
+      return res.status(400).json({ error: '"destinations" array is required.' });
     }
-    const data = await generateSuggestion({ destinations });
-    res.json(data);
+    
+    const suggestion = await generateSuggestion({ destinations });
+    res.json(suggestion);
+
   } catch (err) {
-    console.error('suggest error', err);
-    res.status(500).json({ error: 'Failed to generate suggestion' });
+    console.error('[/api/suggest] Error:', err);
+    res.status(500).json({ error: 'Failed to generate suggestions.' });
   }
 });
 

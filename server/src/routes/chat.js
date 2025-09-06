@@ -1,38 +1,29 @@
+// server/src/routes/chat.js
+
 import { Router } from 'express';
 import { mustBeAuthed } from '../middleware/auth.js';
-import { generateChat, STAGES } from '../services/ai.js';
+import { generateChat } from '../services/ai.js';
 
 const router = Router();
-// Enforce Firebase auth for chat interactions
 router.use(mustBeAuthed);
 
-// POST /api/chat
-// Body: { message?, stage, user?, state? }
 router.post('/', async (req, res) => {
   try {
-    const { message = '', stage, user, state } = req.body || {};
-    const stageSafe = stage || STAGES.greeting;
-    const data = await generateChat({ message, stage: stageSafe, user: user || null, state: state || {} });
+    const { message = '', stage, state = {} } = req.body;
+    
+    // The AI service now handles all the complex logic instantly
+    const response = await generateChat({ message, stage, state });
+    
+    res.json(response);
 
-    // If the assistant reply looks like a full markdown itinerary, return as markdown
-    const replyText = String(data?.reply || '');
-    if (replyText.trim().startsWith('#')) {
-      return res.type('text/markdown').send(replyText);
-    }
-    return res.json(data);
   } catch (err) {
-    console.error('chat route error', err);
-    // Graceful fallback for chat mode so the UI can proceed even if model/env fails
-    const fallback = {
-      reply: "Hello! I'm your Voyager.AI assistant. Do you already have a specific list of locations in mind, or only a region?",
-      stageNext: STAGES.ask_intent,
-      input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
-      quickOptions: ['I have specific locations', 'I only know a region'],
-    };
-    return res.status(200).json(fallback);
+    console.error('[/api/chat] Error:', err);
+    res.status(500).json({ 
+      reply: "I seem to be having trouble connecting. Please try again in a moment.",
+      stageNext: req.body.stage || 'greeting',
+      input: { type: 'freeText' }
+    });
   }
 });
 
 export default router;
-
-

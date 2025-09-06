@@ -24,3 +24,37 @@ body, html, #root {
 	border-radius: 20px;
 	border: 3px solid transparent;
 }
+
+/* Print styles */
+@media print {
+	/* Use white background and dark text for print */
+	html, body {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+		background: #ffffff !important;
+		color: #111827 !important; /* gray-900 */
+	}
+	/* Expand the canvas to full page and remove fixed positioning */
+	.itinerary-canvas {
+		position: static !important;
+		inset: auto !important;
+		width: 100% !important;
+		height: auto !important;
+		background: #ffffff !important;
+		border: none !important;
+		box-shadow: none !important;
+	}
+	/* Utility to force page breaks between days */
+	.print-page-break {
+		page-break-before: always;
+		break-before: page;
+	}
+	/* Avoid breaking inside key blocks */
+	.prose, section, h1, h2, h3, p, ul, ol, div {
+		page-break-inside: avoid;
+		break-inside: avoid;
+	}
+	/* Hide non-essential chrome */
+	.print\:hidden { display: none !important; }
+	.print\:block { display: block !important; }
+}

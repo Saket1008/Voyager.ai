@@ -1,112 +1,93 @@
+// server/src/index.js
+
 import dotenv from 'dotenv';
 import fs from 'fs';
-import path from 'path';
-
-// Load environment variables as early as possible. Try normal dotenv first,
-// then fall back to parsing the .env file as UTF-16LE (some Windows editors
-// save files in UTF-16 which dotenv can't parse).
-const envPath = path.resolve(process.cwd(), '.env');
-let loaded = false;
-try {
-  const r = dotenv.config();
-  loaded = !!(r.parsed && Object.keys(r.parsed).length);
-} catch (e) {
-  loaded = false;
+// Attempt standard dotenv load
+const dotenvResult = dotenv.config();
+if (dotenvResult.error) {
+  console.warn('[EnvCheck] dotenv.config() reported error:', dotenvResult.error.message);
 }
-
-if (!loaded && fs.existsSync(envPath)) {
+// Fallback: manual parse if GEMINI_API_KEY still missing (handles UTF-16 or BOM issues)
+if (!process.env.GEMINI_API_KEY) {
   try {
-    const raw = fs.readFileSync(envPath);
-    // detect UTF-16 LE BOM (0xFF 0xFE)
-    const isUtf16Le = raw.length >= 2 && raw[0] === 0xff && raw[1] === 0xfe;
-    const str = isUtf16Le ? raw.toString('utf16le') : raw.toString('utf8');
-    const parsed = dotenv.parse(str);
-    Object.keys(parsed).forEach((k) => {
-      if (process.env[k] === undefined) process.env[k] = parsed[k];
+    const raw = fs.readFileSync(new URL('../.env', import.meta.url));
+    // Try UTF-8 first, if zeros embedded assume UTF-16 LE
+    let text = raw.toString('utf8');
+    if (/\x00/.test(text)) {
+      text = raw.toString('utf16le');
+    }
+    text.split(/\r?\n/).forEach(line => {
+      if (!line || line.startsWith('#')) return;
+      const eq = line.indexOf('=');
+      if (eq === -1) return;
+      const key = line.slice(0, eq).trim();
+      const val = line.slice(eq + 1).trim();
+      if (key && !(key in process.env)) process.env[key] = val;
     });
-    console.log('[VoyagerAI] .env loaded via fallback parser; UTF16LE=', isUtf16Le);
-    loaded = true;
+    if (process.env.GEMINI_API_KEY) {
+      console.log('[EnvCheck] GEMINI_API_KEY recovered via manual parse.');
+    }
   } catch (e) {
-    // don't leak secrets in logs
-    console.log('[VoyagerAI] .env fallback parsing failed');
+    console.warn('[EnvCheck] Manual .env parse failed:', e.message);
   }
 }
 
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { authMiddleware } from './middleware/auth.js';
 
-// Import routers AFTER env is loaded so downstream modules see process.env
-const { default: suggestRouter } = await import('./routes/suggest.js');
-const { default: chatRouter } = await import('./routes/chat.js');
-const { default: dnaRouter } = await import('./routes/dna.js');
-const { default: destinationsRouter } = await import('./routes/destinations.js');
-const { default: journeysRouter } = await import('./routes/journeys.js');
-const { authMiddleware } = await import('./middleware/auth.js');
+// Import your new and refactored routes
+import chatRouter from './routes/chat.js';
+import suggestRouter from './routes/suggest.js';
+import itineraryRouter from './routes/itinerary.js';
+import journeysRouter from './routes/journeys.js';
+import destinationsRouter from './routes/destinations.js';
+// Removed legacy DNA route
 
 const app = express();
 
 app.use(express.json({ limit: '1mb' }));
 
-// CORS: allow explicit origins, never '*" when credentials are enabled
-const allowedOrigins = (process.env.CLIENT_ORIGIN
-  ? process.env.CLIENT_ORIGIN.split(',').map((s) => s.trim())
-  : ['http://localhost:5173']);
-
-const corsOptions = {
-  origin(origin, callback) {
-    // Allow non-browser requests (no origin) and whitelisted origins
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+// CORS setup from your file
+const allowedOrigins = (process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.split(',') : ['http://localhost:5173']);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-
-// Basic rate limiting for all API routes
+// Rate limiting
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  message: 'Too many requests from this IP, please try again after 15 minutes',
 });
 app.use('/api/', apiLimiter);
 
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// Diagnostic: report whether Gemini key is present in environment (do NOT log the key itself)
-console.log(`[VoyagerAI] GEMINI_API_KEY is ${process.env.GEMINI_API_KEY ? 'present' : 'missing'} in process.env`);
-// Additional diagnostics to help debug .env loading
-try {
-  const fs = await import('fs');
-  const path = await import('path');
-  const cwd = process.cwd();
-  console.log('[VoyagerAI] server working dir:', cwd);
-  const guess = path.resolve(cwd, '.env');
-  console.log('[VoyagerAI] looking for .env at', guess, 'exists=', fs.existsSync(guess));
-} catch (e) {}
-
-// API routes
-// Public or legacy routes (if any) should be mounted without auth.
-
-// Protected routes (Firebase-authenticated)
-app.use('/api/generate-itinerary', authMiddleware, dnaRouter);
-
-// TODO: Standardize and protect the remaining routes with Firebase auth
-app.use('/api/destinations', authMiddleware, destinationsRouter);
-app.use('/api/suggest', authMiddleware, suggestRouter);
+// --- API Routes ---
+// The main chat conductor - now very fast
 app.use('/api/chat', authMiddleware, chatRouter);
-app.use('/api/journeys', journeysRouter);
+// The dedicated fast suggestion route
+app.use('/api/suggest', authMiddleware, suggestRouter);
+// The dedicated heavyweight itinerary route
+app.use('/api/itinerary', authMiddleware, itineraryRouter);
+
+// Keeping your other existing routes
+app.use('/api/destinations', authMiddleware, destinationsRouter);
+// Legacy DNA route removed in favor of /api/itinerary
+app.use('/api/journeys', authMiddleware, journeysRouter);
+
 
 const port = process.env.PORT || 5000;
+// Debug: show whether GEMINI_API_KEY loaded (without leaking full key)
+const gKey = process.env.GEMINI_API_KEY;
+console.log('[EnvCheck] GEMINI_API_KEY present:', gKey ? `yes (length=${gKey.length})` : 'no');
+console.log('[EnvCheck] GEMINI_MODEL:', process.env.GEMINI_MODEL || 'default');
 app.listen(port, () => console.log(`\n🚀 Server listening on http://localhost:${port}\n`));
-

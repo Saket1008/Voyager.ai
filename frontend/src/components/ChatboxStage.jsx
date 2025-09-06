@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+// NOTE: ChatMessage component extracted (lightweight) in ChatMessage.jsx; existing inline rendering retained for now.
 import { motion, AnimatePresence } from 'framer-motion';
-import { getFirebaseIdToken } from '../lib/firebaseClient';
+import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
-import { auth } from '../lib/firebaseClient';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { signOut } from 'firebase/auth';
-import { Search, LogOut, RefreshCw, Copy, Send, Bot, Calendar, Users, MapPin, Menu, X, Plus, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
 
 // Enhanced StageInput component with advanced date selection and pace options
-const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit }) => {
+const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints }) => {
   const [multiSel, setMultiSel] = useState([]);
   const [uiDays, setUiDays] = useState(flowState?.durationDays || 7);
   const [uiDaysFlex, setUiDaysFlex] = useState(flowState?.durationFlex || false);
@@ -44,13 +44,22 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     }
   }, [inputSpec?.type, flowState?.interests]);
 
+  // Helper: format date as local YYYY-MM-DD (avoid UTC toISOString off-by-one)
+  const fmtLocalYMD = (d) => {
+    if (!(d instanceof Date)) d = new Date(d);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   // Auto-calculate end date when start date and days are set
   useEffect(() => {
     if (uiStartDate && uiDays && inputSpec?.type === 'dates') {
       const start = new Date(uiStartDate);
       const end = new Date(start);
       end.setDate(start.getDate() + uiDays - 1);
-      setUiEndDate(end.toISOString().split('T')[0]);
+      setUiEndDate(fmtLocalYMD(end));
     }
   }, [uiStartDate, uiDays, inputSpec?.type]);
 
@@ -87,14 +96,14 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
 
   const isDateSelected = (day) => {
     if (!day) return false;
-    const date = new Date(calendarYear, calendarMonth, day).toISOString().split('T')[0];
+    const date = fmtLocalYMD(new Date(calendarYear, calendarMonth, day));
     return date === uiStartDate || date === uiEndDate;
   };
 
   const handleDateSelect = (day) => {
     if (!day) return;
-    const selectedDate = new Date(calendarYear, calendarMonth, day);
-    const dateString = selectedDate.toISOString().split('T')[0];
+  const selectedDate = new Date(calendarYear, calendarMonth, day);
+  const dateString = fmtLocalYMD(selectedDate);
     
     if (!uiStartDate || (uiStartDate && uiEndDate)) {
       // First click or resetting - set start date
@@ -137,9 +146,9 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     // Reset to match original duration
     if (uiStartDate && originalDays) {
       const start = new Date(uiStartDate);
-      const end = new Date(start);
-      end.setDate(start.getDate() + originalDays - 1);
-      setUiEndDate(end.toISOString().split('T')[0]);
+  const end = new Date(start);
+  end.setDate(start.getDate() + originalDays - 1);
+  setUiEndDate(fmtLocalYMD(end));
       setUiDays(originalDays);
     }
     setShowDurationWarning(false);
@@ -185,6 +194,17 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
       setFlowState(prev => ({ ...prev, interests: multiSel }));
       await onSubmit(multiSel.join(', '));
     } else {
+      // Free text stages
+      if (stage === 'input_region') {
+        const region = String(value || '').trim();
+        if (region) setFlowState(prev => ({ ...prev, region }));
+      } else if (stage === 'input_locations') {
+        const locations = String(value || '')
+          .split(/,|\n/)
+          .map(s => s.trim())
+          .filter(Boolean);
+        if (locations.length) setFlowState(prev => ({ ...prev, locations }));
+      }
       await onSubmit(value);
     }
   };
@@ -217,22 +237,42 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     };
 
     const opts = quickOptions || [];
-    const gridCols = opts.length <= 1 ? 'grid-cols-1' : opts.length === 2 ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3';
+    const gridCols = (() => {
+      const n = opts.length;
+      if (n === 1) return 'grid-cols-1';
+      if (n === 2) return 'grid-cols-2';
+      if (n === 3) return 'grid-cols-3'; // all in one line
+      if (n === 4) return 'grid-cols-2'; // 2 + 2, avoid 3+1
+      return 'grid-cols-2 md:grid-cols-3';
+    })();
+
+  const centerSingle = (stage === 'generate_suggestions' || stage === 'iterate') && opts.length === 1;
+    // Determine if we should disable Generate itinerary based on required fields
+    const requiresGuard = opts.includes('Generate itinerary');
+    const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
+    const hasDuration = !!flowState?.durationDays || (flowState?.startDate && flowState?.endDate);
 
     return (
       <div className="space-y-4">
-        <div className={`grid ${gridCols} gap-4`}>
+        <div className={`${centerSingle ? 'grid grid-cols-1 place-items-center' : `grid ${gridCols}`} gap-4`}>
           {opts.map((opt, i) => (
             <button
               key={i}
               onClick={() => handleSubmit(opt)}
-              className="p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left"
+              disabled={requiresGuard && opt === 'Generate itinerary' && !(hasDest && hasDuration)}
+              className={`p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left ${centerSingle ? 'min-w-[280px]' : ''}`}
             >
               <div className="font-medium text-base text-purple-200 group-hover:text-purple-100">{opt}</div>
               <div className="text-xs opacity-75 mt-1 text-white/70">{descriptionFor(opt)}</div>
             </button>
           ))}
         </div>
+        {requiresGuard && !hasDest && (
+          <div className="text-center text-xs text-white/70">Add at least one destination or a region first.</div>
+        )}
+        {requiresGuard && hasDest && !hasDuration && (
+          <div className="text-center text-xs text-white/70">Set trip days or select dates before generating.</div>
+        )}
       </div>
     );
   }
@@ -302,24 +342,20 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               +
             </button>
           </div>
-          
-          {/* Quick day selection buttons */}
-          <div className="grid grid-cols-4 gap-2 mb-6">
-            {[3, 5, 7, 10, 14, 21, 30].map(days => (
-              <button
-                key={days}
-                onClick={() => setUiDays(days)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  uiDays === days
-                    ? 'bg-blue-500 text-white shadow-lg'
-                    : 'bg-white/10 text-white/90 hover:bg-white/20'
-                }`}
-              >
-                {days}d
-              </button>
-            ))}
-          </div>
         </div>
+
+        {hints?.recommended_days && (
+          <div className="mx-auto max-w-sm rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-emerald-200 text-xs flex items-center justify-between gap-3">
+            <span className="opacity-90">Suggested: {hints.recommended_days} days</span>
+            <button
+              onClick={() => {
+                const numeric = parseInt(String(hints.recommended_days).match(/\d+/)?.[0] || '');
+                if (numeric) setUiDays(numeric);
+              }}
+              className="px-2 py-1 rounded-md bg-emerald-500/30 hover:bg-emerald-500/50 text-[11px] font-medium"
+            >Apply</button>
+          </div>
+        )}
 
         {/* Simple flexibility checkbox with description */}
         <div className="text-center">
@@ -382,7 +418,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                     console.log('Start date changed:', e.target.value);
                   }}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none"
-                  min={new Date().toISOString().split('T')[0]}
+                    min={fmtLocalYMD(new Date())}
                 />
                 {uiStartDate && (
                   <p className="mt-1 text-xs text-white/70">{formatDate(uiStartDate)}</p>
@@ -415,7 +451,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                     }
                   }}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none"
-                  min={uiStartDate || new Date().toISOString().split('T')[0]}
+                  min={uiStartDate || fmtLocalYMD(new Date())}
                 />
                 {uiEndDate && (
                   <p className="mt-1 text-xs text-white/70">{formatDate(uiEndDate)}</p>
@@ -525,8 +561,13 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                   <ChevronLeft className="w-4 h-4 text-white" />
                 </button>
                 
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-3">
                   {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {hints?.best_months && (
+                    <span className="text-[11px] font-normal px-2 py-1 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-200">
+                      Best: {hints.best_months}
+                    </span>
+                  )}
                 </h3>
                 
                 <button
@@ -554,7 +595,8 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
 
               <div className="grid grid-cols-7 gap-1">
                 {generateCalendar().map((day, index) => {
-                  const isDisabled = !day || new Date(calendarYear, calendarMonth, day) < new Date().setHours(0,0,0,0);
+                  const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+                  const isDisabled = !day || new Date(calendarYear, calendarMonth, day) < todayMid;
                   return (
                     <button
                       key={index}
@@ -579,8 +621,8 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               </div>
 
               {/* Instruction text below calendar */}
-              <div className="mt-4 text-xs text-white/60 text-center">
-                <p>Click once to set start date, click again to set end date</p>
+              <div className="mt-4 text-[11px] text-white/50 text-center">
+                Click once for start, again for end. {hints?.best_months ? `Prime months: ${hints.best_months}` : ''}
               </div>
             </div>
 
@@ -720,10 +762,12 @@ const ItineraryCards = ({ items }) => {
   );
 };
 
-const ChatMessage = ({ message, userName }) => {
+const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
   const isUser = message.role === 'user';
   const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white shadow-inner';
-  const userCls = 'ml-auto inline-block rounded-full px-4 py-2 text-sm font-medium text-white bg-gradient-to-br from-blue-500 to-indigo-600';
+  const userCls = 'ml-auto inline-block max-w-[70%] rounded-[18px] px-4 py-3 text-sm font-medium text-white bg-gradient-to-br from-[#16a34a] to-[#10b981] border border-white/10 shadow-inner';
+  const [showThinking, setShowThinking] = React.useState(false);
+  const hasThinking = !!message?.contextUsed;
 
   return (
     <div className={`flex items-start gap-4 my-6 ${isUser ? 'justify-end' : ''}`}>
@@ -741,15 +785,31 @@ const ChatMessage = ({ message, userName }) => {
               <div className="prose prose-invert prose-p:my-0 prose-headings:my-2 break-words">
                 <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
               </div>
+              {/* Per-new spec: remove centralized hints panel; hints now appear contextually in StageInput */}
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <button title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+              <button onClick={onRegenerate} title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <RefreshCw className="w-4 h-4" />
               </button>
-              <button title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+              <button onClick={() => onCopy(String(message.content ?? ''))} title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <Copy className="w-4 h-4" />
               </button>
+              {hasThinking && (
+                <button
+                  onClick={() => setShowThinking(v => !v)}
+                  title={showThinking ? 'Hide thinking' : 'Show thinking'}
+                  className="h-8 rounded-md px-2 bg-white/6 border border-white/10 text-white/90 hover:bg-white/10 flex items-center gap-1 text-xs"
+                >
+                  <Lightbulb className="w-4 h-4" /> {showThinking ? 'Hide' : 'Thinking'}
+                </button>
+              )}
             </div>
+            {hasThinking && showThinking && (
+              <div className="mt-3 rounded-xl bg-black/40 border border-white/10 p-3 text-xs text-white/80">
+                <div className="mb-1 font-medium text-white/90">Context used</div>
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 opacity-90">{JSON.stringify(message.contextUsed, null, 2)}</pre>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -758,7 +818,7 @@ const ChatMessage = ({ message, userName }) => {
   );
 };
 
-export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
+export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {}, onItineraryGenerated }) {
   const { currentUser } = useAuth();
   const fullNameOrEmail = currentUser?.displayName || currentUser?.email || '';
   const shortName = (() => {
@@ -794,6 +854,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [quickOptions, setQuickOptions] = useState([]);
   const [flowState, setFlowState] = useState({});
   const [stage, setStage] = useState('greeting');
+  const [latestHints, setLatestHints] = useState(null);
   const greetedRef = useRef(new Set());
   const lastAssistantStageRef = useRef({});
   const endRef = useRef(null);
@@ -839,6 +900,59 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   }, [activeChat?.messages.length, isTyping]);
 
   const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+  
+  // Generate itinerary via dedicated API, bypassing chat generation to save cost
+  const generateItineraryDirect = async () => {
+    const chatId = activeId;
+    try {
+      // Pre-check: require at least a destination or a region before generating
+      const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
+      if (!hasDest) {
+        // Nudge the user and route to the destinations input
+        pushMessage(chatId, 'assistant', {
+          content: 'Need Destinations First\n\nPlease provide at least one destination (city/place) or a region before generating an itinerary.'
+        });
+        setStage('input_locations');
+        setInputSpec({ type: 'freeText', placeholder: 'Type one or more cities/places (comma-separated)…' });
+        return;
+      }
+
+      setIsTyping(true);
+      // Show the user's click in the transcript if not already present
+      pushMessage(chatId, 'user', 'Generate itinerary');
+      const token = await getFirebaseIdToken();
+      const res = await fetch(`${base}/api/itinerary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tripState: { ...flowState } }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`${res.status}: ${errText}`);
+      }
+      const markdown = await res.text();
+      // If parent provided a handler, show the dedicated Itinerary Canvas instead of dumping markdown in chat
+      if (typeof onItineraryGenerated === 'function') {
+        onItineraryGenerated({ markdown, plannedDays: flowState?.durationDays || null });
+        // Add a small confirmation in-chat
+        pushMessage(chatId, 'assistant', { content: 'Your detailed itinerary is ready — opening the canvas.' });
+      } else {
+        // Backward-compatibility: render in chat
+        pushMessage(chatId, 'assistant', { content: markdown });
+      }
+      // Move stage to iterate
+      setStage('iterate');
+      setInputSpec({ type: 'freeText' });
+    } catch (e) {
+      pushMessage(chatId, 'assistant', `Sorry, I couldn't generate the itinerary: ${e.message}`);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+ 
 
   const pushMessage = (chatId, role, content) => {
     const makeMsg = (role, content) => {
@@ -929,12 +1043,28 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       const token = await getFirebaseIdToken();
       const stageToSend = stageOverride || stage || 'greeting';
 
+      // Persist destinations/region when using the free-text composer
+      if (stageToSend === 'input_locations' && msg) {
+        const locations = msg.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+        if (locations.length) {
+          setFlowState(prev => ({ ...prev, locations }));
+          // Optionally set chat title from first location
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${locations[0]}` : c.title } : c));
+        }
+      } else if (stageToSend === 'input_region' && msg) {
+        const region = msg.trim();
+        if (region) {
+          setFlowState(prev => ({ ...prev, region }));
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${region}` : c.title } : c));
+        }
+      }
+
       const payload = {
         mode: 'chat',
         message: msg,
         stage: stageToSend,
         user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
-        state: flowState,
+        state: { ...flowState },
       };
 
       const res = await fetch(`${base}/api/chat`, {
@@ -976,7 +1106,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         setFlowState(prev => ({ ...prev, ...data.state }));
       }
 
-      // Build assistant message
+      if (data?.hints) {
+        setLatestHints(data.hints);
+      }
+
+      // Build assistant message (markdown or plain text)
       const assistantMsg = {
         content: data?.reply || data?.message,
         suggestions: data?.suggestions,
@@ -984,9 +1118,15 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         currentStage: data?.stageNext || stage,
         nextStage: data?.stageNext,
         hints: data?.hints,
+  contextUsed: data?.contextUsed,
       };
 
       pushMessage(chatId, 'assistant', assistantMsg);
+
+      // If the server provided itinerary card items, render them as a separate assistant message
+      if (Array.isArray(data?.itineraryItems) && data.itineraryItems.length) {
+        pushMessage(chatId, 'assistant', { type: 'itinerary-json', content: data.itineraryItems });
+      }
 
     } catch (err) {
       pushMessage(chatId, 'assistant', `Sorry, I encountered an error: ${err.message}`);
@@ -1049,7 +1189,11 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     }
 
     // For all other options, include the current stage as context
-    await sendMessage(opt, currentStage);
+  // For option stages, also echo to flowState when they convey concrete info
+  if (currentStage === 'ask_travelers') setFlowState(prev => ({ ...prev, travelers: opt }));
+  if (currentStage === 'ask_pace') setFlowState(prev => ({ ...prev, pace: opt }));
+  if (currentStage === 'ask_budget') setFlowState(prev => ({ ...prev, budget: opt }));
+  await sendMessage(opt, currentStage);
   };
   
   const handleKey = (e) => { 
@@ -1160,44 +1304,92 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   return (
     <div className="relative h-screen w-full text-white bg-transparent">
       <div className="flex min-h-0">
-        {/* Sidebar: full-height column */}
-        <aside className={`w-80 border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl p-6 flex flex-col items-center min-h-0`} style={{ height: '100vh' }}>
-          {/* Centered logo block */}
-          <div className="flex flex-col items-center mb-4">
-            <div className="h-20 w-20 flex items-center justify-center rounded-2xl bg-white/3 p-3">
-              <img src="/logo.png" alt="Voyager" className="h-full w-full object-contain" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold tracking-tight">Voyager.ai</div>
-            <div className="mt-1 text-sm text-white/70">Welcome, {(currentUser?.displayName || currentUser?.email || 'Guest').split(' ')[0]}</div>
+          {/* Sidebar: collapsible with animation; when canvas is open it will be controlled from canvas header */}
+        <motion.aside
+          animate={{ width: isSidebarOpen ? 280 : 60 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+          className={`border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl px-3 py-4 flex flex-col items-stretch min-h-0 overflow-hidden`}
+          style={{ height: '100vh' }}
+        >
+          {/* Sidebar header */}
+          <div className={`mb-3 px-1 ${isSidebarOpen ? 'block' : 'flex flex-col items-center gap-2'}`}>
+            {isSidebarOpen ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                    title="Collapse"
+                    onClick={() => setIsSidebarOpen && setIsSidebarOpen(false)}
+                  >
+                    <Menu className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-col items-center text-center px-0">
+                  <img src="/logo-secondary.png" alt="Voyager brand" className="h-16 w-16 rounded-full object-contain" />
+                  <div className="mt-3">
+                    <div className="text-3xl font-semibold tracking-tight leading-tight">Voyager.ai</div>
+                    <div className="text-sm text-white/70 mt-1">Welcome, {firstName || 'Traveler'}</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Expand"
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+                <button
+                  className="p-1.5 rounded-lg text-white/90 hover:bg-white/10"
+                  title="Expand"
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                >
+                  <img src="/logo-secondary.png" alt="Voyager" className="h-9 w-9 rounded-full object-contain" />
+                </button>
+              </>
+            )}
           </div>
 
-          {/* Search toggle/button */}
+          {/* Search (icon-only in collapsed mode) */}
           <div className="w-full mb-4">
-            {!searchOpen ? (
-              <button 
-                onClick={() => { 
-                  setSearchOpen(true); 
-                  setTimeout(() => searchRef.current?.focus(), 60); 
-                }} 
-                className="w-full text-left rounded-lg bg-black/40 px-3 py-2 text-sm text-white/80 hover:bg-black/50 transition-colors"
-              >
-                🔎 Search chats
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
-                <Search className="w-4 h-4 text-white/70" />
-                <input 
-                  ref={searchRef} 
-                  placeholder="Search chats" 
-                  value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
-                  className="bg-transparent outline-none text-sm text-white/80 w-full" 
-                />
-                <button 
-                  onClick={() => { setSearch(''); setSearchOpen(false); }} 
-                  className="text-white/60 hover:text-white/80 transition-colors"
+            {isSidebarOpen ? (
+              !searchOpen ? (
+                <div 
+                  onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 60); }} 
+                  className="flex items-center gap-2 text-sm text-white/80 cursor-text select-none px-1"
+                  title="Search chats"
                 >
-                  ✕
+                  <span className="text-base">🔎</span>
+                  <span>Search chats</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
+                  <Search className="w-4 h-4 text-white/70" />
+                  <input 
+                    ref={searchRef} 
+                    placeholder="Search chats" 
+                    value={search} 
+                    onChange={(e) => setSearch(e.target.value)} 
+                    className="bg-transparent outline-none text-sm text-white/80 w-full" 
+                  />
+                  <button 
+                    onClick={() => { setSearch(''); setSearchOpen(false); }} 
+                    className="text-white/60 hover:text-white/80 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            ) : (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Open search"
+                >
+                  <Search className="w-5 h-5" />
                 </button>
               </div>
             )}
@@ -1206,9 +1398,10 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           <div className="w-full mb-4">
             <button 
               onClick={newChat} 
-              className="w-full text-left rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] px-4 py-2 text-sm font-semibold text-black shadow-sm hover:shadow-md transition-shadow"
+              className={`w-full rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] ${isSidebarOpen ? 'px-4 py-2 text-sm' : 'p-2'} font-semibold text-black shadow-sm hover:shadow-md transition-shadow flex items-center justify-center`}
+              title="New Journey"
             >
-              + New Journey
+              {isSidebarOpen ? '+ New Journey' : '+'}
             </button>
           </div>
 
@@ -1219,44 +1412,44 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
               return visible.map((c) => (
                 <div 
                   key={c.id} 
-                  className={`rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                  className={`rounded-lg ${isSidebarOpen ? 'px-3 py-2 text-sm' : 'p-2'} cursor-pointer transition-colors flex items-center justify-center ${
                     c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'
                   }`} 
                   onClick={() => setActiveId(c.id)}
+                  title={c.title}
                 >
-                  {c.title}
+                  {isSidebarOpen ? (
+                    c.title
+                  ) : (
+                    <MapPin className="w-4 h-4" />
+                  )}
                 </div>
               ));
             })()}
           </div>
 
           {/* Profile / Logout at bottom */}
-          <div className="w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3">
-            <div className="flex items-center gap-3">
-              <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={44} />
-              <div className="text-sm">
-                <div className="font-medium">{shortName}</div>
-                <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
-              </div>
-            </div>
-            <div className="ml-auto">
-              {currentUser ? (
-                <button 
-                  onClick={() => { 
-                    try { 
-                      signOut(auth); 
-                    } catch (e) { 
-                      console.error('Sign out error:', e); 
-                    } 
-                  }} 
-                  className="rounded-md p-2 bg-white/5 hover:bg-white/10 transition-colors"
+          <div className={`w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3 ${isSidebarOpen ? '' : 'justify-center'}`}>
+            <div className={`flex items-center ${isSidebarOpen ? 'gap-3 w-full' : 'justify-center w-full'}`}>
+              <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={isSidebarOpen ? 44 : 40} />
+              {isSidebarOpen && (
+                <div className="text-sm flex-1 min-w-0">
+                  <div className="font-medium truncate">{shortName}</div>
+                  <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
+                </div>
+              )}
+              {isSidebarOpen && currentUser && (
+                <button
+                  onClick={() => { try { signOut(auth); } catch (e) { console.error('Sign out error:', e); } }}
+                  title="Log out"
+                  className="ml-auto rounded-md p-2 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
                 >
                   <LogOut className="w-4 h-4 text-white" />
                 </button>
-              ) : null}
+              )}
             </div>
           </div>
-        </aside>
+  </motion.aside>
 
         {/* Main chat area: full-height flex column so input stays at bottom */}
         <main className="flex-1 overflow-hidden relative flex flex-col min-h-0" style={{ height: '100vh' }}>
@@ -1270,17 +1463,17 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
             }}
           >
             <div className="mx-auto max-w-3xl pt-2">
-              {activeChat?.messages?.map((m, i) => (
+        {activeChat?.messages?.map((m, i) => (
                 <div key={i}>
-                  <ChatMessage message={m} userName={fullNameOrEmail} />
+          <ChatMessage message={m} userName={fullNameOrEmail} onCopy={handleCopy} onRegenerate={handleRegenerate} />
                 </div>
               ))}
 
               {isTyping && (
                 <div className="my-4 flex items-start gap-4">
-                  <div className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
-                    <Bot className="h-6 w-6 text-white" />
-                  </div>
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/6 border border-white/10 overflow-hidden">
+                      <img src="/logo.png" alt="Voyager" className="h-8 w-8 object-contain animate-pulse" />
+                    </div>
                   <div className="w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse"></div>
@@ -1313,11 +1506,17 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         quickOptions={quickOptions}
                         flowState={flowState}
                         setFlowState={(s) => setFlowState(s)}
+                        stage={stage}
+                        hints={latestHints}
                         onSubmit={async (value) => {
                           // The `StageInput` component now just submits a value.
                           // `sendMessage` handles all the logic of constructing and sending the payload.
                           const messageText = typeof value === 'string' ? value : JSON.stringify(value);
-                          await sendMessage(messageText);
+                          if (messageText === 'Generate itinerary') {
+                            await generateItineraryDirect();
+                          } else {
+                            await sendMessage(messageText);
+                          }
                         }}
                       />
                     </div>
@@ -1330,6 +1529,17 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                     exit={{ opacity: 0, y: 30 }} 
                     transition={{ duration: 0.18 }}
                   >
+                    {/* Finalize details helper: show a centered proceed button while keeping free text input */}
+                    {stage === 'finalize_details' && inputSpec?.proceedOption ? (
+                      <div className="flex justify-center mb-3">
+                        <button
+                          onClick={() => sendMessage(inputSpec.proceedOption, 'finalize_details')}
+                          className="px-6 py-2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-md"
+                        >
+                          {inputSpec.proceedOption}
+                        </button>
+                      </div>
+                    ) : null}
                     <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
                       <TextareaAutosize 
                         value={input} 
@@ -1337,7 +1547,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         onKeyPress={handleKey} 
                         minRows={1} 
                         maxRows={6} 
-                        placeholder="Type your message..." 
+                        placeholder={stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...'} 
                         className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" 
                         disabled={isTyping}
                       />

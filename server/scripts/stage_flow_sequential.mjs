@@ -52,14 +52,10 @@ async function run() {
   // Budget
   state.budget = 'Mid-Range';
   res = await step('ask_budget', 'Mid-Range', stage);
-  stage = STAGES.must_haves;
+  stage = STAGES.finalize_details;
 
-  // Must haves
-  res = await step('must_haves', 'Taj Mahal, backwaters', stage);
-  stage = STAGES.must_nots;
-
-  // Must nots
-  res = await step('must_nots', 'Avoid seafood and tight schedules', stage);
+  // Finalize details (combined must-haves and must-nots)
+  res = await step('finalize_details', 'Taj Mahal; Avoid seafood and tight schedules', stage);
   stage = STAGES.generate_suggestions;
 
   // Generate
