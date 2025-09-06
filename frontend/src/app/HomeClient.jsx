@@ -16,9 +16,9 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const [showWormhole, setShowWormhole] = useState(false)
   const titleRef = useRef(null)
   const buttonRef = useRef(null)
+  // When an itinerary is generated we store a normalized shape: { markdown: string, plannedDays?: number|null }
   const [itineraryData, setItineraryData] = useState(null)
   const [isItineraryOpen, setIsItineraryOpen] = useState(false)
-  const [plannedDays, setPlannedDays] = useState(null)
 
   const handleStartJourney = () => {
     setIsAnimating(true)
@@ -32,9 +32,10 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   }
 
   const handleItineraryGenerated = (payload) => {
-    const { markdown, plannedDays: pDays } = typeof payload === 'string' ? { markdown: payload, plannedDays: null } : payload
-    setItineraryData(markdown)
-    setPlannedDays(pDays || null)
+    // Support both legacy string and new object payload { markdown, plannedDays }
+    const markdown = typeof payload === 'string' ? payload : (payload?.markdown || '')
+    const plannedDays = typeof payload === 'object' ? (payload?.plannedDays ?? null) : null
+    setItineraryData({ markdown, plannedDays })
     setIsItineraryOpen(true)
     try { setIsSidebarOpen(false) } catch {}
   }
@@ -88,11 +89,12 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
             >
         {itineraryData && isItineraryOpen && (
                 <ItineraryCanvas 
-          itineraryMarkdown={itineraryData}
-          plannedDays={plannedDays}
+          // Always pass a markdown string; plannedDays if provided by generator
+          itineraryMarkdown={typeof itineraryData === 'string' ? itineraryData : (itineraryData?.markdown || '')}
                   onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
                   isSidebarOpen={isSidebarOpen}
                   onToggleSidebar={() => { try { setIsSidebarOpen(v => !v) } catch {} }}
+          plannedDays={typeof itineraryData === 'object' ? (itineraryData?.plannedDays ?? null) : null}
                 />
               )}
             </motion.div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 // NOTE: ChatMessage component extracted (lightweight) in ChatMessage.jsx; existing inline rendering retained for now.
 import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
+import { getApiBase, isApiMisconfiguredForHosting } from '../lib/apiBase';
 import { useAuth } from '../context/AuthContext';
 import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { signOut } from 'firebase/auth';
@@ -899,12 +900,20 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages.length, isTyping]);
 
-  const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+  // Resolve API base with production safeguards
+  const base = getApiBase();
+  const apiMisconfigured = isApiMisconfiguredForHosting();
   
   // Generate itinerary via dedicated API, bypassing chat generation to save cost
   const generateItineraryDirect = async () => {
     const chatId = activeId;
     try {
+      if (apiMisconfigured) {
+        pushMessage(chatId, 'assistant', {
+          content: 'Service is not configured for production. Please set VITE_API_BASE to your live backend URL and redeploy.'
+        });
+        return;
+      }
       // Pre-check: require at least a destination or a region before generating
       const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
       if (!hasDest) {
@@ -921,6 +930,12 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       // Show the user's click in the transcript if not already present
       pushMessage(chatId, 'user', 'Generate itinerary');
       const token = await getFirebaseIdToken();
+      if (!token && currentUser == null) {
+        pushMessage(chatId, 'assistant', {
+          content: 'Please sign in to generate an itinerary.'
+        });
+        return;
+      }
       const res = await fetch(`${base}/api/itinerary`, {
         method: 'POST',
         headers: {
@@ -931,6 +946,9 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       });
       if (!res.ok) {
         const errText = await res.text();
+        if (res.status === 401) {
+          throw new Error('401 Unauthorized — please sign in.');
+        }
         throw new Error(`${res.status}: ${errText}`);
       }
       const markdown = await res.text();
@@ -947,7 +965,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       setStage('iterate');
       setInputSpec({ type: 'freeText' });
     } catch (e) {
-      pushMessage(chatId, 'assistant', `Sorry, I couldn't generate the itinerary: ${e.message}`);
+      pushMessage(chatId, 'assistant', `Sorry, I couldn't generate the itinerary. ${e?.message || 'Unknown error.'}`);
     } finally {
       setIsTyping(false);
     }
@@ -1040,7 +1058,23 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       setInput('');
       setIsTyping(true);
 
+      if (apiMisconfigured) {
+        pushMessage(chatId, 'assistant', {
+          content: 'Service is not configured for production. Please set VITE_API_BASE to your live backend URL and redeploy.'
+        });
+        setIsTyping(false);
+        sendingRef.current = false;
+        return;
+      }
       const token = await getFirebaseIdToken();
+      if (!token && currentUser == null) {
+        pushMessage(chatId, 'assistant', {
+          content: 'Please sign in to continue the chat.'
+        });
+        setIsTyping(false);
+        sendingRef.current = false;
+        return;
+      }
       const stageToSend = stageOverride || stage || 'greeting';
 
       // Persist destinations/region when using the free-text composer
@@ -1077,10 +1111,35 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       });
 
       if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}: ${await res.text()}`);
+        const t = await res.text();
+        if (res.status === 401) {
+          throw new Error('401 Unauthorized — please sign in.');
+        }
+        throw new Error(`Server responded with ${res.status}: ${t}`);
       }
 
-      const data = await res.json();
+      // Be robust to accidental HTML (e.g., Hosting rewrite to index.html)
+      let data;
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      if (ctype.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        // If we received HTML, surface a helpful hint instead of a cryptic JSON error
+        if (/<!doctype html>/i.test(text) || /<html[\s>]/i.test(text)) {
+          pushMessage(chatId, 'assistant', {
+            content: 'Unexpected HTML from /api/chat. On Firebase Hosting, ensure you deploy from the repo root so hosting rewrites route /api/** to your Cloud Function. If you deployed from the frontend folder, /api requests are going to index.html.'
+          });
+          setIsTyping(false);
+          sendingRef.current = false;
+          return;
+        }
+        // Try to parse if it was actually JSON without proper content-type
+        try { data = JSON.parse(text); }
+        catch {
+          throw new Error('API returned a non-JSON response.');
+        }
+      }
 
 
 
@@ -1129,7 +1188,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       }
 
     } catch (err) {
-      pushMessage(chatId, 'assistant', `Sorry, I encountered an error: ${err.message}`);
+      pushMessage(chatId, 'assistant', `Sorry, I encountered an error. ${err?.message || ''}`);
     } finally {
       setIsTyping(false);
       sendingRef.current = false;
@@ -1453,6 +1512,12 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
         {/* Main chat area: full-height flex column so input stays at bottom */}
         <main className="flex-1 overflow-hidden relative flex flex-col min-h-0" style={{ height: '100vh' }}>
+          {/* Connection/auth status banner */}
+          {apiMisconfigured && (
+            <div className="mx-auto max-w-3xl mt-3 mb-0 p-3 rounded-lg border border-yellow-400/40 bg-yellow-500/10 text-yellow-100 text-xs">
+              Backend not configured for production. Set VITE_API_BASE to your live API URL before building and deploying.
+            </div>
+          )}
           <div
             className="flex-1 overflow-y-auto p-8 min-h-0"
             style={{

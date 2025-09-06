@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { auth, db, isFirebaseReady } from '../lib/firebaseClient';
+import { getApiBase } from '../lib/apiBase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
@@ -40,7 +41,7 @@ export default function JourneyHistory() {
           setSaving(true);
           try {
             const token = await auth.currentUser.getIdToken();
-            const res = await fetch((import.meta.env.VITE_API_BASE || 'http://localhost:5000') + '/api/journeys', {
+            const res = await fetch(getApiBase() + '/api/journeys', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
               body: JSON.stringify({ title: 'Saved from UI', prompt: 'Saved via JourneyHistory' }),

@@ -30,8 +30,16 @@ export function ensureFirebaseAdmin() {
     initialized = true;
     return admin;
   }
-  console.warn('[FirebaseAdmin] Service account not configured. Set FIREBASE_SERVICE_ACCOUNT or provide serviceAccountKey.json');
-  return null;
+  // Last fallback: initialize with Application Default Credentials (works on Cloud Functions/App Engine)
+  try {
+    admin.initializeApp();
+    initialized = true;
+    console.log('[FirebaseAdmin] Initialized with Application Default Credentials');
+    return admin;
+  } catch (e) {
+    console.warn('[FirebaseAdmin] Service account not configured and ADC init failed. Set FIREBASE_SERVICE_ACCOUNT or provide serviceAccountKey.json');
+    return null;
+  }
 }
 
 export default admin;
