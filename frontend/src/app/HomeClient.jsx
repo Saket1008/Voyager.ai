@@ -18,6 +18,7 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const buttonRef = useRef(null)
   const [itineraryData, setItineraryData] = useState(null)
   const [isItineraryOpen, setIsItineraryOpen] = useState(false)
+  const [plannedDays, setPlannedDays] = useState(null)
 
   const handleStartJourney = () => {
     setIsAnimating(true)
@@ -30,8 +31,10 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
     setTimeout(() => { setShowTitle(true); setTimeout(() => setShowButton(true), 800) }, 500)
   }
 
-  const handleItineraryGenerated = (markdown) => {
+  const handleItineraryGenerated = (payload) => {
+    const { markdown, plannedDays: pDays } = typeof payload === 'string' ? { markdown: payload, plannedDays: null } : payload
     setItineraryData(markdown)
+    setPlannedDays(pDays || null)
     setIsItineraryOpen(true)
     try { setIsSidebarOpen(false) } catch {}
   }
@@ -83,9 +86,10 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
               transition={{ type: 'spring', stiffness: 260, damping: 30 }}
               className="h-full overflow-hidden"
             >
-              {itineraryData && isItineraryOpen && (
+        {itineraryData && isItineraryOpen && (
                 <ItineraryCanvas 
-                  itineraryMarkdown={itineraryData}
+          itineraryMarkdown={itineraryData}
+          plannedDays={plannedDays}
                   onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
                   isSidebarOpen={isSidebarOpen}
                   onToggleSidebar={() => { try { setIsSidebarOpen(v => !v) } catch {} }}

@@ -233,11 +233,18 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
     `2. If only one destination is provided, keep all nights there and optionally include nearby day trips (return same night).`,
     `3. Never replace the user's destination with a different famous city (e.g., do NOT swap to Rome, Lisbon, etc. unless explicitly provided).`,
     `4. Output MUST reflect exactly the supplied duration (${trip.durationDays} days).`,
-    `FORMAT REQUIREMENTS:`,
-    `- Start with a concise Trip Overview.`,
-    `- Then each Day as: ### Day N: Title`,
-    `- Under each day include: Morning, Afternoon, Evening, Meals, Logistics/Tips.`,
-    `- Avoid filler; be specific and localized.`
+  `FORMAT REQUIREMENTS:`,
+  `- Start with a concise section titled: ## Trip Overview (2-5 sentences).`,
+  `- Then each day as a level-3 heading: ### Day N: Title`,
+  `- Under each day include labeled bold subsections exactly in this order:`,
+  `  **Morning:** Provide 2-4 time-stamped steps as bullets. Each step must follow this exact pattern: "- HH:MM AM/PM — Title: 1 short sentence (Duration: XhYm)".`,
+  `  **Afternoon:** Provide 2-4 time-stamped steps with the same pattern as Morning. Include realistic transfer notes where applicable.`,
+  `  **Evening:** Provide 1-3 time-stamped steps with the same pattern. End with a relaxed option if suitable.`,
+  `  **Meals:** (1-3 named spots with short notes)`,
+  `  **Logistics & Tips:** (practical notes for that day)`,
+  `- After the final day, add a global section: ## Must Try (foods/experiences unique to the destination; bullet points with 1 sentence each).`,
+  `- End with: ## Tips (essential, safety, transport, money-saving; 5-10 concise bullets).`,
+  `- Avoid filler; be specific, localized, and respect the exact duration.`
   ];
 
   const prompt = promptParts.join('\n');
@@ -250,8 +257,10 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
     let md = `# Trip Itinerary\n\n**Destinations:** ${locs.join(', ')}\n**Duration:** ${days} day${days>1?'s':''}\n\n## Trip Overview\nA structured ${days}-day plan centered on ${locs.join(', ')}.\n`;
     for (let d=1; d<=days; d++) {
       const loc = locs[(d-1) % locs.length];
-      md += `\n### Day ${d}: ${loc} Focus\n**Morning:** Local highlights in ${loc}.\n**Afternoon:** Deeper exploration / museum / neighborhood walk.\n**Evening:** Dinner with regional cuisine.\n**Meals:** Suggest 1 cafe, 1 lunch spot, 1 dinner spot (align to interests).\n**Logistics/Tips:** Keep transfers minimal; stay centered near lodging.\n`;
+      md += `\n### Day ${d}: ${loc} Focus\n**Morning:**\n- 08:30 AM — Coffee & Start: Cozy cafe to fuel up (Duration: 45m)\n- 09:30 AM — Signature Sight: Guided visit to a top landmark (Duration: 1h30m)\n- 11:15 AM — Stroll: Walk a scenic street or market (Duration: 45m)\n**Afternoon:**\n- 12:30 PM — Lunch Nearby: Casual local eatery (Duration: 1h)\n- 02:00 PM — Museum/Attraction: Deep dive into ${loc}'s culture (Duration: 1h30m)\n- 03:45 PM — Park/Lookout: Short break with views (Duration: 30m)\n**Evening:**\n- 06:00 PM — Sunset Spot: Golden-hour viewpoint (Duration: 45m)\n- 07:30 PM — Dinner: Regional specialty restaurant (Duration: 1h30m)\n**Meals:**\n- Cafe Aurora — Light breakfast, great espresso\n- Market Bistro — Local plates for lunch\n- Atelier Kitchen — Seasonal dinner tasting\n**Logistics & Tips:**\n- Use rideshare or walk between close sights; carry small cash.\n- Prebook timed entries when possible.\n`;
     }
+    md += `\n## Must Try\n- Signature dish or experience specific to ${locs[0]}.\n- A local dessert or market to sample.\n- A short, unique activity tied to the place.\n`;
+    md += `\n## Tips\n- Start early for popular sights; prebook tickets when possible.\n- Carry cash and cards; confirm local transport hours.\n- Dress for local norms and weather; stay hydrated.\n- Keep copies of IDs; use reputable taxis/rides.\n`;
     return md;
   }
 

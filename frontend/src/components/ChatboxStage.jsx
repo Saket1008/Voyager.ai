@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 // NOTE: ChatMessage component extracted (lightweight) in ChatMessage.jsx; existing inline rendering retained for now.
 import { motion, AnimatePresence } from 'framer-motion';
-import { getFirebaseIdToken } from '../lib/firebaseClient';
+import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { signOut } from 'firebase/auth';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
@@ -935,7 +936,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       const markdown = await res.text();
       // If parent provided a handler, show the dedicated Itinerary Canvas instead of dumping markdown in chat
       if (typeof onItineraryGenerated === 'function') {
-        onItineraryGenerated(markdown);
+        onItineraryGenerated({ markdown, plannedDays: flowState?.durationDays || null });
         // Add a small confirmation in-chat
         pushMessage(chatId, 'assistant', { content: 'Your detailed itinerary is ready — opening the canvas.' });
       } else {
@@ -1310,31 +1311,59 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           className={`border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl px-3 py-4 flex flex-col items-stretch min-h-0 overflow-hidden`}
           style={{ height: '100vh' }}
         >
-          {/* Sidebar header with hamburger */}
-          <div className="flex items-center gap-2 mb-3 px-1">
-            <button
-              className="p-2 rounded-md text-white/80 hover:bg-white/10"
-              title={isSidebarOpen ? 'Collapse' : 'Expand'}
-              onClick={() => setIsSidebarOpen && setIsSidebarOpen(!isSidebarOpen)}
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <img src="/logo.png" alt="Voyager" className={`${isSidebarOpen ? 'h-7 w-7' : 'h-8 w-8'} rounded-md object-cover`} />
-              {isSidebarOpen && <div className="text-base font-semibold tracking-tight">Voyager.ai</div>}
-            </div>
+          {/* Sidebar header */}
+          <div className={`mb-3 px-1 ${isSidebarOpen ? 'block' : 'flex flex-col items-center gap-2'}`}>
+            {isSidebarOpen ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                    title="Collapse"
+                    onClick={() => setIsSidebarOpen && setIsSidebarOpen(false)}
+                  >
+                    <Menu className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-col items-center text-center px-0">
+                  <img src="/logo-secondary.png" alt="Voyager brand" className="h-16 w-16 rounded-full object-contain" />
+                  <div className="mt-3">
+                    <div className="text-3xl font-semibold tracking-tight leading-tight">Voyager.ai</div>
+                    <div className="text-sm text-white/70 mt-1">Welcome, {firstName || 'Traveler'}</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Expand"
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+                <button
+                  className="p-1.5 rounded-lg text-white/90 hover:bg-white/10"
+                  title="Expand"
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                >
+                  <img src="/logo-secondary.png" alt="Voyager" className="h-9 w-9 rounded-full object-contain" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Search (icon-only in collapsed mode) */}
           <div className="w-full mb-4">
             {isSidebarOpen ? (
               !searchOpen ? (
-                <button 
+                <div 
                   onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 60); }} 
-                  className="w-full text-left rounded-lg bg-black/40 px-3 py-2 text-sm text-white/80 hover:bg-black/50 transition-colors"
+                  className="flex items-center gap-2 text-sm text-white/80 cursor-text select-none px-1"
+                  title="Search chats"
                 >
-                  🔎 Search chats
-                </button>
+                  <span className="text-base">🔎</span>
+                  <span>Search chats</span>
+                </div>
               ) : (
                 <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
                   <Search className="w-4 h-4 text-white/70" />
@@ -1401,13 +1430,22 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
           {/* Profile / Logout at bottom */}
           <div className={`w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3 ${isSidebarOpen ? '' : 'justify-center'}`}>
-            <div className="flex items-center gap-3 justify-center w-full">
+            <div className={`flex items-center ${isSidebarOpen ? 'gap-3 w-full' : 'justify-center w-full'}`}>
               <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={isSidebarOpen ? 44 : 40} />
               {isSidebarOpen && (
-                <div className="text-sm">
-                  <div className="font-medium">{shortName}</div>
+                <div className="text-sm flex-1 min-w-0">
+                  <div className="font-medium truncate">{shortName}</div>
                   <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
                 </div>
+              )}
+              {isSidebarOpen && currentUser && (
+                <button
+                  onClick={() => { try { signOut(auth); } catch (e) { console.error('Sign out error:', e); } }}
+                  title="Log out"
+                  className="ml-auto rounded-md p-2 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-white" />
+                </button>
               )}
             </div>
           </div>

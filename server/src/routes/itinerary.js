@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { mustBeAuthed } from '../middleware/auth.js';
 import { generateItineraryMarkdown } from '../services/ai.js';
+import { getTravelProfile } from '../services/firebaseAdmin.js';
 
 const router = Router();
 router.use(mustBeAuthed);
@@ -25,8 +26,14 @@ router.post('/', async (req, res) => {
     }
     console.log('[ITINERARY_LOG] Received tripState:', JSON.stringify(tripState, null, 2));
 
+    let travelProfile = null;
+    try {
+      travelProfile = await getTravelProfile(user.uid);
+    } catch (e) {
+      console.warn('[ITINERARY_LOG] Failed to fetch travel profile:', e?.message);
+    }
     console.log('[ITINERARY_LOG] Calling generateItineraryMarkdown...');
-    const markdown = await generateItineraryMarkdown({ user, tripState });
+    const markdown = await generateItineraryMarkdown({ user, travelProfile, tripState });
 
     console.log('[ITINERARY_LOG] Successfully generated itinerary markdown.');
     res.type('text/markdown').send(markdown);
