@@ -35,3 +35,73 @@ export function ensureFirebaseAdmin() {
 }
 
 export default admin;
+// PASTE THIS CODE AT THE END OF firebaseAdmin.js
+
+export async function getTravelProfile(uid) {
+  if (!uid) return null;
+  const admin = ensureFirebaseAdmin();
+  if (!admin) return null;
+
+  try {
+    const userDocRef = admin.firestore().collection('users').doc(uid);
+    const docSnap = await userDocRef.get();
+    if (docSnap.exists) {
+      return docSnap.data().travelProfile || {};
+    }
+    return {};
+  } catch (error) {
+    console.error(`Failed to fetch travel profile for UID: ${uid}`, error);
+    return null;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

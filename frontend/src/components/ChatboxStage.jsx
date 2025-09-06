@@ -1,17 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+// NOTE: ChatMessage component extracted (lightweight) in ChatMessage.jsx; existing inline rendering retained for now.
 import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken } from '../lib/firebaseClient';
 import { useAuth } from '../context/AuthContext';
-import { auth } from '../lib/firebaseClient';
-import { signOut } from 'firebase/auth';
-import { Search, LogOut, RefreshCw, Copy, Send, Bot, Calendar, Users, MapPin, Menu, X, Plus, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
 
 // Enhanced StageInput component with advanced date selection and pace options
-const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage }) => {
+const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints }) => {
   const [multiSel, setMultiSel] = useState([]);
   const [uiDays, setUiDays] = useState(flowState?.durationDays || 7);
   const [uiDaysFlex, setUiDaysFlex] = useState(flowState?.durationFlex || false);
@@ -247,6 +246,11 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     })();
 
   const centerSingle = (stage === 'generate_suggestions' || stage === 'iterate') && opts.length === 1;
+    // Determine if we should disable Generate itinerary based on required fields
+    const requiresGuard = opts.includes('Generate itinerary');
+    const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
+    const hasDuration = !!flowState?.durationDays || (flowState?.startDate && flowState?.endDate);
+
     return (
       <div className="space-y-4">
         <div className={`${centerSingle ? 'grid grid-cols-1 place-items-center' : `grid ${gridCols}`} gap-4`}>
@@ -254,6 +258,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
             <button
               key={i}
               onClick={() => handleSubmit(opt)}
+              disabled={requiresGuard && opt === 'Generate itinerary' && !(hasDest && hasDuration)}
               className={`p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left ${centerSingle ? 'min-w-[280px]' : ''}`}
             >
               <div className="font-medium text-base text-purple-200 group-hover:text-purple-100">{opt}</div>
@@ -261,6 +266,12 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
             </button>
           ))}
         </div>
+        {requiresGuard && !hasDest && (
+          <div className="text-center text-xs text-white/70">Add at least one destination or a region first.</div>
+        )}
+        {requiresGuard && hasDest && !hasDuration && (
+          <div className="text-center text-xs text-white/70">Set trip days or select dates before generating.</div>
+        )}
       </div>
     );
   }
@@ -331,6 +342,19 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
             </button>
           </div>
         </div>
+
+        {hints?.recommended_days && (
+          <div className="mx-auto max-w-sm rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-emerald-200 text-xs flex items-center justify-between gap-3">
+            <span className="opacity-90">Suggested: {hints.recommended_days} days</span>
+            <button
+              onClick={() => {
+                const numeric = parseInt(String(hints.recommended_days).match(/\d+/)?.[0] || '');
+                if (numeric) setUiDays(numeric);
+              }}
+              className="px-2 py-1 rounded-md bg-emerald-500/30 hover:bg-emerald-500/50 text-[11px] font-medium"
+            >Apply</button>
+          </div>
+        )}
 
         {/* Simple flexibility checkbox with description */}
         <div className="text-center">
@@ -536,8 +560,13 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
                   <ChevronLeft className="w-4 h-4 text-white" />
                 </button>
                 
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-3">
                   {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {hints?.best_months && (
+                    <span className="text-[11px] font-normal px-2 py-1 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-200">
+                      Best: {hints.best_months}
+                    </span>
+                  )}
                 </h3>
                 
                 <button
@@ -591,8 +620,8 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               </div>
 
               {/* Instruction text below calendar */}
-              <div className="mt-4 text-xs text-white/60 text-center">
-                <p>Click once to set start date, click again to set end date</p>
+              <div className="mt-4 text-[11px] text-white/50 text-center">
+                Click once for start, again for end. {hints?.best_months ? `Prime months: ${hints.best_months}` : ''}
               </div>
             </div>
 
@@ -755,6 +784,7 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
               <div className="prose prose-invert prose-p:my-0 prose-headings:my-2 break-words">
                 <ReactMarkdown>{String(message.content ?? '')}</ReactMarkdown>
               </div>
+              {/* Per-new spec: remove centralized hints panel; hints now appear contextually in StageInput */}
             </div>
             <div className="mt-2 flex items-center gap-2">
               <button onClick={onRegenerate} title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
@@ -787,7 +817,7 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
   );
 };
 
-export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
+export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {}, onItineraryGenerated }) {
   const { currentUser } = useAuth();
   const fullNameOrEmail = currentUser?.displayName || currentUser?.email || '';
   const shortName = (() => {
@@ -823,6 +853,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [quickOptions, setQuickOptions] = useState([]);
   const [flowState, setFlowState] = useState({});
   const [stage, setStage] = useState('greeting');
+  const [latestHints, setLatestHints] = useState(null);
   const greetedRef = useRef(new Set());
   const lastAssistantStageRef = useRef({});
   const endRef = useRef(null);
@@ -868,6 +899,58 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   }, [activeChat?.messages.length, isTyping]);
 
   const base = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+  
+  // Generate itinerary via dedicated API, bypassing chat generation to save cost
+  const generateItineraryDirect = async () => {
+    const chatId = activeId;
+    try {
+      // Pre-check: require at least a destination or a region before generating
+      const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
+      if (!hasDest) {
+        // Nudge the user and route to the destinations input
+        pushMessage(chatId, 'assistant', {
+          content: 'Need Destinations First\n\nPlease provide at least one destination (city/place) or a region before generating an itinerary.'
+        });
+        setStage('input_locations');
+        setInputSpec({ type: 'freeText', placeholder: 'Type one or more cities/places (comma-separated)…' });
+        return;
+      }
+
+      setIsTyping(true);
+      // Show the user's click in the transcript if not already present
+      pushMessage(chatId, 'user', 'Generate itinerary');
+      const token = await getFirebaseIdToken();
+      const res = await fetch(`${base}/api/itinerary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tripState: { ...flowState } }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`${res.status}: ${errText}`);
+      }
+      const markdown = await res.text();
+      // If parent provided a handler, show the dedicated Itinerary Canvas instead of dumping markdown in chat
+      if (typeof onItineraryGenerated === 'function') {
+        onItineraryGenerated(markdown);
+        // Add a small confirmation in-chat
+        pushMessage(chatId, 'assistant', { content: 'Your detailed itinerary is ready — opening the canvas.' });
+      } else {
+        // Backward-compatibility: render in chat
+        pushMessage(chatId, 'assistant', { content: markdown });
+      }
+      // Move stage to iterate
+      setStage('iterate');
+      setInputSpec({ type: 'freeText' });
+    } catch (e) {
+      pushMessage(chatId, 'assistant', `Sorry, I couldn't generate the itinerary: ${e.message}`);
+    } finally {
+      setIsTyping(false);
+    }
+  };
  
 
   const pushMessage = (chatId, role, content) => {
@@ -959,6 +1042,22 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       const token = await getFirebaseIdToken();
       const stageToSend = stageOverride || stage || 'greeting';
 
+      // Persist destinations/region when using the free-text composer
+      if (stageToSend === 'input_locations' && msg) {
+        const locations = msg.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+        if (locations.length) {
+          setFlowState(prev => ({ ...prev, locations }));
+          // Optionally set chat title from first location
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${locations[0]}` : c.title } : c));
+        }
+      } else if (stageToSend === 'input_region' && msg) {
+        const region = msg.trim();
+        if (region) {
+          setFlowState(prev => ({ ...prev, region }));
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${region}` : c.title } : c));
+        }
+      }
+
       const payload = {
         mode: 'chat',
         message: msg,
@@ -1004,6 +1103,10 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       }
       if (data?.state) {
         setFlowState(prev => ({ ...prev, ...data.state }));
+      }
+
+      if (data?.hints) {
+        setLatestHints(data.hints);
       }
 
       // Build assistant message (markdown or plain text)
@@ -1200,44 +1303,64 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   return (
     <div className="relative h-screen w-full text-white bg-transparent">
       <div className="flex min-h-0">
-        {/* Sidebar: full-height column */}
-        <aside className={`w-80 border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl p-6 flex flex-col items-center min-h-0`} style={{ height: '100vh' }}>
-          {/* Centered logo block */}
-          <div className="flex flex-col items-center mb-4">
-            <div className="h-20 w-20 flex items-center justify-center rounded-2xl bg-white/3 p-3">
-              <img src="/logo.png" alt="Voyager" className="h-full w-full object-contain" />
+          {/* Sidebar: collapsible with animation; when canvas is open it will be controlled from canvas header */}
+        <motion.aside
+          animate={{ width: isSidebarOpen ? 280 : 60 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+          className={`border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl px-3 py-4 flex flex-col items-stretch min-h-0 overflow-hidden`}
+          style={{ height: '100vh' }}
+        >
+          {/* Sidebar header with hamburger */}
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <button
+              className="p-2 rounded-md text-white/80 hover:bg-white/10"
+              title={isSidebarOpen ? 'Collapse' : 'Expand'}
+              onClick={() => setIsSidebarOpen && setIsSidebarOpen(!isSidebarOpen)}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2">
+              <img src="/logo.png" alt="Voyager" className={`${isSidebarOpen ? 'h-7 w-7' : 'h-8 w-8'} rounded-md object-cover`} />
+              {isSidebarOpen && <div className="text-base font-semibold tracking-tight">Voyager.ai</div>}
             </div>
-            <div className="mt-3 text-2xl font-semibold tracking-tight">Voyager.ai</div>
-            <div className="mt-1 text-sm text-white/70">Welcome, {(currentUser?.displayName || currentUser?.email || 'Guest').split(' ')[0]}</div>
           </div>
 
-          {/* Search toggle/button */}
+          {/* Search (icon-only in collapsed mode) */}
           <div className="w-full mb-4">
-            {!searchOpen ? (
-              <button 
-                onClick={() => { 
-                  setSearchOpen(true); 
-                  setTimeout(() => searchRef.current?.focus(), 60); 
-                }} 
-                className="w-full text-left rounded-lg bg-black/40 px-3 py-2 text-sm text-white/80 hover:bg-black/50 transition-colors"
-              >
-                🔎 Search chats
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
-                <Search className="w-4 h-4 text-white/70" />
-                <input 
-                  ref={searchRef} 
-                  placeholder="Search chats" 
-                  value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
-                  className="bg-transparent outline-none text-sm text-white/80 w-full" 
-                />
+            {isSidebarOpen ? (
+              !searchOpen ? (
                 <button 
-                  onClick={() => { setSearch(''); setSearchOpen(false); }} 
-                  className="text-white/60 hover:text-white/80 transition-colors"
+                  onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 60); }} 
+                  className="w-full text-left rounded-lg bg-black/40 px-3 py-2 text-sm text-white/80 hover:bg-black/50 transition-colors"
                 >
-                  ✕
+                  🔎 Search chats
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 rounded-md bg-black/30 px-2 py-1">
+                  <Search className="w-4 h-4 text-white/70" />
+                  <input 
+                    ref={searchRef} 
+                    placeholder="Search chats" 
+                    value={search} 
+                    onChange={(e) => setSearch(e.target.value)} 
+                    className="bg-transparent outline-none text-sm text-white/80 w-full" 
+                  />
+                  <button 
+                    onClick={() => { setSearch(''); setSearchOpen(false); }} 
+                    className="text-white/60 hover:text-white/80 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            ) : (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Open search"
+                >
+                  <Search className="w-5 h-5" />
                 </button>
               </div>
             )}
@@ -1246,9 +1369,10 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           <div className="w-full mb-4">
             <button 
               onClick={newChat} 
-              className="w-full text-left rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] px-4 py-2 text-sm font-semibold text-black shadow-sm hover:shadow-md transition-shadow"
+              className={`w-full rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] ${isSidebarOpen ? 'px-4 py-2 text-sm' : 'p-2'} font-semibold text-black shadow-sm hover:shadow-md transition-shadow flex items-center justify-center`}
+              title="New Journey"
             >
-              + New Journey
+              {isSidebarOpen ? '+ New Journey' : '+'}
             </button>
           </div>
 
@@ -1259,44 +1383,35 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
               return visible.map((c) => (
                 <div 
                   key={c.id} 
-                  className={`rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                  className={`rounded-lg ${isSidebarOpen ? 'px-3 py-2 text-sm' : 'p-2'} cursor-pointer transition-colors flex items-center justify-center ${
                     c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'
                   }`} 
                   onClick={() => setActiveId(c.id)}
+                  title={c.title}
                 >
-                  {c.title}
+                  {isSidebarOpen ? (
+                    c.title
+                  ) : (
+                    <MapPin className="w-4 h-4" />
+                  )}
                 </div>
               ));
             })()}
           </div>
 
           {/* Profile / Logout at bottom */}
-          <div className="w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3">
-            <div className="flex items-center gap-3">
-              <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={44} />
-              <div className="text-sm">
-                <div className="font-medium">{shortName}</div>
-                <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
-              </div>
-            </div>
-            <div className="ml-auto">
-              {currentUser ? (
-                <button 
-                  onClick={() => { 
-                    try { 
-                      signOut(auth); 
-                    } catch (e) { 
-                      console.error('Sign out error:', e); 
-                    } 
-                  }} 
-                  className="rounded-md p-2 bg-white/5 hover:bg-white/10 transition-colors"
-                >
-                  <LogOut className="w-4 h-4 text-white" />
-                </button>
-              ) : null}
+          <div className={`w-full mt-4 pt-3 border-t border-white/6 flex items-center gap-3 ${isSidebarOpen ? '' : 'justify-center'}`}>
+            <div className="flex items-center gap-3 justify-center w-full">
+              <Avatar role="user" name={currentUser?.displayName || currentUser?.email || ''} size={isSidebarOpen ? 44 : 40} />
+              {isSidebarOpen && (
+                <div className="text-sm">
+                  <div className="font-medium">{shortName}</div>
+                  <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
+                </div>
+              )}
             </div>
           </div>
-        </aside>
+  </motion.aside>
 
         {/* Main chat area: full-height flex column so input stays at bottom */}
         <main className="flex-1 overflow-hidden relative flex flex-col min-h-0" style={{ height: '100vh' }}>
@@ -1354,11 +1469,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         flowState={flowState}
                         setFlowState={(s) => setFlowState(s)}
                         stage={stage}
+                        hints={latestHints}
                         onSubmit={async (value) => {
                           // The `StageInput` component now just submits a value.
                           // `sendMessage` handles all the logic of constructing and sending the payload.
                           const messageText = typeof value === 'string' ? value : JSON.stringify(value);
-                          await sendMessage(messageText);
+                          if (messageText === 'Generate itinerary') {
+                            await generateItineraryDirect();
+                          } else {
+                            await sendMessage(messageText);
+                          }
                         }}
                       />
                     </div>

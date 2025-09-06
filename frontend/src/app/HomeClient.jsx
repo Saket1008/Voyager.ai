@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import SpaceBackground from '../components/SpaceBackground.jsx'
 import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
+import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
@@ -15,6 +16,8 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const [showWormhole, setShowWormhole] = useState(false)
   const titleRef = useRef(null)
   const buttonRef = useRef(null)
+  const [itineraryData, setItineraryData] = useState(null)
+  const [isItineraryOpen, setIsItineraryOpen] = useState(false)
 
   const handleStartJourney = () => {
     setIsAnimating(true)
@@ -25,6 +28,12 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const handleLoadingComplete = () => {
     setCurrentView('main')
     setTimeout(() => { setShowTitle(true); setTimeout(() => setShowButton(true), 800) }, 500)
+  }
+
+  const handleItineraryGenerated = (markdown) => {
+    setItineraryData(markdown)
+    setIsItineraryOpen(true)
+    try { setIsSidebarOpen(false) } catch {}
   }
 
 
@@ -55,7 +64,48 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
       {/* Final Chat */}
       {currentView === 'final' && (
         <motion.div className="fixed inset-0 z-20" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.2, ease: 'easeOut' }}>
-          <ChatboxStage isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+          <div className="h-full w-full flex">
+            {/* Chat area shrinks when canvas is open */}
+            <motion.div
+              animate={{ width: isItineraryOpen ? '50%' : '100%' }}
+              transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+              className="h-full"
+            >
+              <ChatboxStage 
+                isSidebarOpen={isSidebarOpen} 
+                setIsSidebarOpen={setIsSidebarOpen} 
+                onItineraryGenerated={handleItineraryGenerated}
+              />
+            </motion.div>
+            {/* Canvas area expands from the right */}
+            <motion.div
+              animate={{ width: isItineraryOpen ? '50%' : '0%' }}
+              transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+              className="h-full overflow-hidden"
+            >
+              {itineraryData && isItineraryOpen && (
+                <ItineraryCanvas 
+                  itineraryMarkdown={itineraryData}
+                  onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
+                  isSidebarOpen={isSidebarOpen}
+                  onToggleSidebar={() => { try { setIsSidebarOpen(v => !v) } catch {} }}
+                />
+              )}
+            </motion.div>
+          </div>
+
+          {/* Reopen chip when canvas closed but data exists */}
+          {itineraryData && !isItineraryOpen && (
+            <div className="fixed bottom-4 right-4 z-10">
+              <button
+                onClick={() => setIsItineraryOpen(true)}
+                className="px-4 py-2 rounded-full bg-green-500 text-black font-semibold shadow hover:bg-green-400"
+                title="Open itinerary"
+              >
+                View itinerary
+              </button>
+            </div>
+          )}
         </motion.div>
       )}
 
