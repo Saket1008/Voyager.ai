@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { getApiBase, isApiMisconfiguredForHosting } from '../lib/apiBase';
 import { useAuth } from '../context/AuthContext';
-import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
@@ -904,6 +904,38 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const base = getApiBase();
   const apiMisconfigured = isApiMisconfiguredForHosting();
   
+  // Generate a catchy chat title using backend AI endpoint
+  const updateChatTitle = async (tripOverride = {}) => {
+    try {
+      const token = await getFirebaseIdToken();
+      const payload = { tripState: { ...flowState, ...tripOverride } };
+      let res = await fetch(`${base}/api/journeys/title`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      // If token is expired or invalid, refresh once and retry
+      if (res.status === 401 || res.status === 403) {
+        const fresh = await getFirebaseIdToken(true);
+        if (fresh) {
+          res = await fetch(`${base}/api/journeys/title`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${fresh}` },
+            body: JSON.stringify(payload),
+          });
+        }
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextTitle = (data?.title || '').trim();
+      if (!nextTitle) return;
+      setChats(prev => prev.map(c => c.id === activeId ? { ...c, title: nextTitle, subtitle: data?.subtitle } : c));
+    } catch {}
+  };
+  
   // Generate itinerary via dedicated API, bypassing chat generation to save cost
   const generateItineraryDirect = async () => {
     const chatId = activeId;
@@ -936,7 +968,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         });
         return;
       }
-      const res = await fetch(`${base}/api/itinerary`, {
+      let res = await fetch(`${base}/api/itinerary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -944,6 +976,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         },
         body: JSON.stringify({ tripState: { ...flowState } }),
       });
+      if (res.status === 401 || res.status === 403) {
+        const fresh = await getFirebaseIdToken(true);
+        if (fresh) {
+          res = await fetch(`${base}/api/itinerary`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${fresh}` },
+            body: JSON.stringify({ tripState: { ...flowState } }),
+          });
+        }
+      }
       if (!res.ok) {
         const errText = await res.text();
         if (res.status === 401) {
@@ -1078,18 +1120,18 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       const stageToSend = stageOverride || stage || 'greeting';
 
       // Persist destinations/region when using the free-text composer
-      if (stageToSend === 'input_locations' && msg) {
+    if (stageToSend === 'input_locations' && msg) {
         const locations = msg.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
         if (locations.length) {
           setFlowState(prev => ({ ...prev, locations }));
-          // Optionally set chat title from first location
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${locations[0]}` : c.title } : c));
+      // Generate a catchy title via backend
+      updateChatTitle({ locations });
         }
       } else if (stageToSend === 'input_region' && msg) {
         const region = msg.trim();
         if (region) {
           setFlowState(prev => ({ ...prev, region }));
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: c.title === 'New chat' ? `Trip: ${region}` : c.title } : c));
+      updateChatTitle({ region });
         }
       }
 
@@ -1101,7 +1143,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         state: { ...flowState },
       };
 
-      const res = await fetch(`${base}/api/chat`, {
+      let res = await fetch(`${base}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1109,6 +1151,16 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         },
         body: JSON.stringify(payload),
       });
+      if (res.status === 401 || res.status === 403) {
+        const fresh = await getFirebaseIdToken(true);
+        if (fresh) {
+          res = await fetch(`${base}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${fresh}` },
+            body: JSON.stringify(payload),
+          });
+        }
+      }
 
       if (!res.ok) {
         const t = await res.text();
@@ -1280,6 +1332,24 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     // Clean up any references
     greetedRef.current.delete(id);
     delete lastAssistantStageRef.current[id];
+  };
+
+  const deleteChat = (id) => {
+    try { greetedRef.current.delete(id); } catch {}
+    try { delete lastAssistantStageRef.current[id]; } catch {}
+    setChats((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      if (id === activeId) {
+        if (next.length) {
+          setActiveId(next[0].id);
+        } else {
+          const nid = Math.random().toString(36).slice(2, 9);
+          setActiveId(nid);
+          return [{ id: nid, title: 'New chat', messages: [] }];
+        }
+      }
+      return next;
+    });
   };
 
   // Load saved chats & search from localStorage on mount
@@ -1469,18 +1539,35 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
               const q = search.trim().toLowerCase();
               const visible = q ? chats.filter((c) => (c.title || '').toLowerCase().includes(q)) : chats;
               return visible.map((c) => (
-                <div 
-                  key={c.id} 
-                  className={`rounded-lg ${isSidebarOpen ? 'px-3 py-2 text-sm' : 'p-2'} cursor-pointer transition-colors flex items-center justify-center ${
-                    c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'
-                  }`} 
-                  onClick={() => setActiveId(c.id)}
+                <div
+                  key={c.id}
+                  className={`rounded-lg ${isSidebarOpen ? 'px-2 py-1.5 text-sm' : 'p-2'} transition-colors flex items-center ${
+                    isSidebarOpen ? 'justify-between' : 'justify-center'
+                  } ${c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'}`}
                   title={c.title}
                 >
-                  {isSidebarOpen ? (
-                    c.title
-                  ) : (
-                    <MapPin className="w-4 h-4" />
+                  <button
+                    className={`${isSidebarOpen ? 'flex-1 text-left truncate' : 'flex items-center justify-center w-full'}`}
+                    onClick={() => setActiveId(c.id)}
+                  >
+                    {isSidebarOpen ? (
+                      <span className="truncate block pr-2">{c.title}</span>
+                    ) : (
+                      <MapPin className="w-4 h-4" />
+                    )}
+                  </button>
+                  {isSidebarOpen && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const confirmDelete = c.messages?.length ? confirm('Delete this chat? This cannot be undone.') : true;
+                        if (confirmDelete) deleteChat(c.id);
+                      }}
+                      title="Delete chat"
+                      className="ml-2 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/10"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               ));

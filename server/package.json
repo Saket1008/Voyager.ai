@@ -5,7 +5,7 @@
   "private": true,
   "engines": { "node": ">=18" },
   "scripts": {
-    "dev": "node --env-file=.env src/index.js",
+  "dev": "node --env-file=.env.local src/index.js",
     "start": "node src/index.js"
   },
   "dependencies": {

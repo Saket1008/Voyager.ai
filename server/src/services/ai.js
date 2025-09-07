@@ -289,3 +289,64 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
     return buildFallbackItinerary();
   }
 }
+
+// Catchy chat title + subtitle for sidebar using Gemini; safe fallbacks when key is missing
+export async function generateChatTitle({ tripState = {} }) {
+  const t = tripState || {};
+  const locs = Array.isArray(t.locations) ? t.locations : (t.locations ? [t.locations] : []);
+  const where = locs.length ? locs.join(' · ') : (t.region || 'Your Trip');
+  const days = Number(t.durationDays) || (t.startDate && t.endDate ? 'Trip' : null);
+  const pace = t.pace ? String(t.pace).replace(/_/g, ' ') : '';
+  const budget = t.budget || '';
+
+  const fallbackTitle = () => {
+    const parts = [];
+    if (where) parts.push(where);
+    if (days && Number(days)) parts.push(`${days} Days`);
+    const emojis = '✈️🌍🛸🌟🗺️🏖️🏔️🏙️';
+    const em = emojis.split('')[Math.floor(Math.random() * emojis.length)] || '🌟';
+    return `${em} ${parts.join(' • ') || 'Voyage'}`.trim();
+  };
+  const fallbackSubtitle = () => {
+    const bits = [];
+    if (pace) bits.push(pace.charAt(0).toUpperCase() + pace.slice(1));
+    if (budget) bits.push(budget);
+    if (t.startDate && t.endDate) bits.push(`${t.startDate} → ${t.endDate}`);
+    return bits.length ? bits.join(' • ') : 'Personalized itinerary conversation';
+  };
+
+  try {
+    const prompt = `Create a catchy, 3–6 word chat title for a travel planning conversation plus a one-sentence subtitle under 90 characters.
+Return strict JSON only with keys: {"title":"...","subtitle":"..."}.
+Rules:
+- Include 1 tasteful emoji in the title if natural (no flags), keep it classy.
+- Title: short, brandy, no trailing punctuation. Subtitle: vivid but concise.
+- No markdown, no extra text, JSON only.
+
+Context:
+- Where: ${where}
+- Duration: ${t.durationDays || 'n/a'} days
+- Dates: ${t.startDate || ''} to ${t.endDate || ''}
+- Travelers: ${t.travelers || ''}
+- Pace: ${pace || ''}
+- Budget: ${budget || ''}
+`;
+    const text = await callGemini({ prompt });
+    const cleaned = String(text).replace(/```json\n?|```/g, '').trim();
+    let parsed = null;
+    try { parsed = JSON.parse(cleaned); } catch {
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]); } catch {}
+      }
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return { title: fallbackTitle(), subtitle: fallbackSubtitle(), _raw: cleaned };
+    }
+    const title = String(parsed.title || '').trim() || fallbackTitle();
+    const subtitle = String(parsed.subtitle || '').trim() || fallbackSubtitle();
+    return { title, subtitle };
+  } catch (e) {
+    return { title: fallbackTitle(), subtitle: fallbackSubtitle(), error: e?.message };
+  }
+}

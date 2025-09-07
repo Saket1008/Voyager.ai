@@ -37,11 +37,20 @@ try {
 export const auth = isFirebaseReady ? getAuth(app) : (null as any);
 export const db = isFirebaseReady ? getFirestore(app) : (null as any);
 
-export async function getFirebaseIdToken(): Promise<string | null> {
+// Returns a Firebase ID token. If the initial attempt fails, it will try a forced refresh.
+export async function getFirebaseIdToken(forceRefresh = false): Promise<string | null> {
   if (!isFirebaseReady || !auth) return null;
   const u = auth.currentUser;
   if (!u) return null;
-  try { return await u.getIdToken(); } catch { return null; }
+  try {
+    return await u.getIdToken(forceRefresh);
+  } catch {
+    // Retry with force refresh once
+    if (!forceRefresh) {
+      try { return await u.getIdToken(true); } catch { return null; }
+    }
+    return null;
+  }
 }
 
 export function waitForAuth(): Promise<User | null> {

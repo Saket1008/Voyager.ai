@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { ensureFirebaseAdmin } from '../services/firebaseAdmin.js';
+import { generateChatTitle } from '../services/ai.js';
 
 const router = Router();
 
@@ -28,3 +29,14 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 export default router;
+
+// Generate catchy chat title for sidebar
+router.post('/title', authMiddleware, async (req, res) => {
+  try {
+    const { tripState } = req.body || {};
+    const out = await generateChatTitle({ tripState: tripState || {} });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'Failed to generate title' });
+  }
+});

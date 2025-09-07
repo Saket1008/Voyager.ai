@@ -14,11 +14,19 @@ export async function authMiddleware(req, res, next) {
       console.error('[authMiddleware] Firebase Admin SDK not initialized.');
       return res.status(500).json({ error: 'Internal Server Error: Auth service not configured.' });
     }
+  // Optional: in local development, allow a very explicit bypass for troubleshooting
+  if (process.env.AUTH_BYPASS_DEV === 'true' && (req.hostname === 'localhost' || req.hostname === '127.0.0.1')) {
+      console.warn('[authMiddleware] AUTH_BYPASS_DEV enabled — treating request as uid="dev".');
+      req.user = { uid: 'dev', email: 'dev@local' };
+      return next();
+  }
   const decoded = await adm.auth().verifyIdToken(idToken);
     req.user = decoded; // { uid, email, ... }
     return next();
   } catch (error) {
-    console.error('[authMiddleware] Error verifying Firebase ID token:', error?.message || error);
+    // Include basic token diagnostics without logging the token itself
+    const hdr = (req.headers.authorization || '').split(' ')[0];
+    console.error('[authMiddleware] Verify error:', error?.message || error, 'hdrPrefix=', hdr);
     return res.status(403).json({ error: 'Forbidden: Invalid token.' });
   }
 }
