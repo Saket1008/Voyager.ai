@@ -11,9 +11,6 @@ declare module '../components/SpaceBackground' {
 declare module '../components/Loader' {
 	const v: any; export default v;
 }
-declare module '../components/Chatbox' {
-	const v: any; export default v;
-}
 declare module '../components/ChatboxStage' {
 	const v: any; export default v;
 }
