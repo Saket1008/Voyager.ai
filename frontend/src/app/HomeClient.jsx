@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import SpaceBackground from '../components/SpaceBackground.jsx'
 import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
-import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
+import ModernItineraryCanvas from '../components/ModernItineraryCanvas.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
@@ -88,12 +88,10 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
               className="h-full overflow-hidden"
             >
         {itineraryData && isItineraryOpen && (
-                <ItineraryCanvas 
+                <ModernItineraryCanvas 
           // Always pass a markdown string; plannedDays if provided by generator
           itineraryMarkdown={typeof itineraryData === 'string' ? itineraryData : (itineraryData?.markdown || '')}
                   onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
-                  isSidebarOpen={isSidebarOpen}
-                  onToggleSidebar={() => { try { setIsSidebarOpen(v => !v) } catch {} }}
           plannedDays={typeof itineraryData === 'object' ? (itineraryData?.plannedDays ?? null) : null}
                 />
               )}

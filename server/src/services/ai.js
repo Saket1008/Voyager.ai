@@ -350,3 +350,90 @@ Context:
     return { title: fallbackTitle(), subtitle: fallbackSubtitle(), error: e?.message };
   }
 }
+
+// Generate dynamic chat name based on conversation context
+export async function generateChatName({ message, stage, flowState, user }) {
+  const userName = user?.displayName || 'Traveler';
+  const destinations = flowState?.locations || [];
+  const region = flowState?.region || '';
+  const duration = flowState?.durationDays || '';
+  
+  // Extract location from message if not in flowState
+  const messageText = message.toLowerCase();
+  const locationKeywords = ['tokyo', 'paris', 'london', 'new york', 'rome', 'barcelona', 'amsterdam', 'berlin', 'mumbai', 'delhi', 'bangalore', 'singapore', 'bangkok', 'dubai', 'istanbul', 'moscow', 'sydney', 'melbourne', 'toronto', 'vancouver', 'mexico city', 'rio de janeiro', 'buenos aires', 'cape town', 'cairo', 'marrakech', 'lisbon', 'madrid', 'athens', 'prague', 'vienna', 'budapest', 'stockholm', 'oslo', 'copenhagen', 'helsinki', 'warsaw', 'krakow', 'brussels', 'zurich', 'geneva', 'munich', 'frankfurt', 'hamburg', 'cologne', 'dresden', 'leipzig', 'stuttgart', 'düsseldorf', 'essen', 'dortmund', 'bremen', 'hannover', 'nuremberg', 'augsburg', 'wiesbaden', 'gelsenkirchen', 'mönchengladbach', 'braunschweig', 'chemnitz', 'kiel', 'aachen', 'halle', 'magdeburg', 'freiburg', 'krefeld', 'lübeck', 'oberhausen', 'erfurt', 'mainz', 'rostock', 'kassel', 'hagen', 'hamm', 'saarbrücken', 'mülheim', 'potsdam', 'ludwigshafen', 'oldenburg', 'leverkusen', 'osnabrück', 'solingen', 'heidelberg', 'herne', 'neuss', 'darmstadt', 'paderborn', 'regensburg', 'ingolstadt', 'würzburg', 'fürth', 'wolfsburg', 'offenbach', 'ulm', 'heilbronn', 'pforzheim', 'göttingen', 'reutlingen', 'bremerhaven', 'remscheid', 'bergisch gladbach', 'jena', 'regenburg', 'erlangen', 'moers', 'siegen', 'hildesheim', 'salzgitter', 'cottbus', 'koblenz', 'giessen', 'witten', 'schwerin', 'flensburg', 'brandenburg', 'zwickau', 'hof', 'lüneburg', 'stralsund', 'friedrichshafen', 'landshut', 'aschaffenburg', 'kempten', 'schweinfurt', 'rosenheim', 'neu-ulm', 'passau', 'freising', 'straubing', 'amberg', 'bayreuth', 'landau', 'weiden', 'schwandorf', 'schweinfurt', 'rosenheim', 'neu-ulm', 'passau', 'freising', 'straubing', 'amberg', 'bayreuth', 'landau', 'weiden', 'schwandorf'];
+  
+  let detectedLocation = '';
+  for (const keyword of locationKeywords) {
+    if (messageText.includes(keyword)) {
+      detectedLocation = keyword;
+      break;
+    }
+  }
+
+  const primaryLocation = destinations[0] || detectedLocation || region;
+  
+  const fallbackNames = [
+    '🌍 Global Adventure',
+    '✈️ Travel Dreams',
+    '🗺️ Journey Planner',
+    '🌟 Epic Trip',
+    '🚀 Voyage Quest',
+    '🏖️ Paradise Search',
+    '🏔️ Mountain Explorer',
+    '🌆 City Hopper',
+    '🍃 Nature Escape',
+    '🎯 Perfect Trip'
+  ];
+
+  try {
+    const prompt = `Generate a catchy, engaging chat name (2-4 words) for a travel planning conversation.
+Return ONLY the name, no quotes, no JSON, no extra text.
+
+Context:
+- User: ${userName}
+- Message: "${message}"
+- Stage: ${stage}
+- Primary Location: ${primaryLocation || 'Not specified'}
+- All Destinations: ${destinations.join(', ') || 'Not specified'}
+- Region: ${region || 'Not specified'}
+- Duration: ${duration ? `${duration} days` : 'Not specified'}
+
+Rules:
+- MUST include the primary location if specified (${primaryLocation})
+- Include 1 relevant emoji (travel-related, no flags)
+- Make it exciting and location-specific
+- Examples: "🌍 Tokyo Dreams", "🏔️ Alpine Quest", "🍃 Nature Escape", "🌆 Paris Explorer"
+- Keep it under 20 characters total
+- Make it sound like an adventure to that specific place
+- If no location, use generic travel terms`;
+
+    const text = await callGemini({ prompt });
+    const cleaned = String(text).trim().replace(/^["']|["']$/g, ''); // Remove quotes if present
+    
+    // Validate the response
+    if (cleaned && cleaned.length > 2 && cleaned.length < 25) {
+      return cleaned;
+    }
+    
+    // Fallback to location-specific or random selection
+    if (primaryLocation) {
+      const locationEmojis = {
+        'tokyo': '🏯', 'paris': '🗼', 'london': '🇬🇧', 'new york': '🗽', 'rome': '🏛️',
+        'barcelona': '🏰', 'amsterdam': '🌷', 'berlin': '🏛️', 'mumbai': '🏛️', 'delhi': '🏛️',
+        'singapore': '🌴', 'bangkok': '🏛️', 'dubai': '🏙️', 'istanbul': '🕌', 'moscow': '🏛️',
+        'sydney': '🏛️', 'melbourne': '🏛️', 'toronto': '🏛️', 'vancouver': '🏔️'
+      };
+      const emoji = locationEmojis[primaryLocation.toLowerCase()] || '🌍';
+      return `${emoji} ${primaryLocation} Adventure`;
+    }
+    
+    return fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
+    
+  } catch (e) {
+    console.error('[generateChatName] Error:', e?.message);
+    if (primaryLocation) {
+      return `🌍 ${primaryLocation} Trip`;
+    }
+    return fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
+  }
+}
