@@ -238,7 +238,10 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
       return map[label] || 'Make a selection to continue';
     };
 
-    const opts = quickOptions || [];
+    // Prefer server-provided quickOptions; fall back to inputSpec.options so mock mode works too
+    const opts = (Array.isArray(quickOptions) && quickOptions.length
+      ? quickOptions
+      : (Array.isArray(inputSpec?.options) ? inputSpec.options : []));
     const gridCols = (() => {
       const n = opts.length;
       if (n === 1) return 'grid-cols-1';
@@ -260,7 +263,19 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
           {opts.map((opt, i) => (
             <button
               key={i}
-              onClick={() => handleSubmit(opt)}
+              onClick={() => {
+                // For the initial intent question, route explicitly to the correct next stage
+                if ((stage === 'greeting' || stage === 'ask_intent')) {
+                  const override = opt === 'I have specific locations'
+                    ? 'input_locations'
+                    : (opt === 'I only know a region' ? 'input_region' : null);
+                  if (override) {
+                    onSubmit({ value: opt, stageOverride: override });
+                    return;
+                  }
+                }
+                handleSubmit(opt);
+              }}
               disabled={requiresGuard && opt === 'Generate itinerary' && !(hasDest && hasDuration)}
               className={`p-4 rounded-xl text-sm transition-all bg-white/10 text-white/90 hover:bg-purple-500/20 border-2 border-white/20 hover:border-purple-400 group text-left ${centerSingle ? 'min-w-[280px]' : ''}`}
             >
@@ -915,6 +930,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         reply: `Hello${firstName ? ', ' + firstName : ''}! I can plan your trip. Do you have specific locations or just a region in mind?`,
         stageNext: 'ask_intent',
         input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
+        quickOptions: ['I have specific locations', 'I only know a region'],
       };
     }
     if (s === 'input_locations') {
@@ -975,6 +991,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         reply: 'Thanks, almost done. Choose your travel pace:',
         stageNext: 'ask_pace',
         input: { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] },
+        quickOptions: ['Relaxed', 'Balanced', 'Action-Packed'],
       };
     }
     if (s === 'ask_pace') {
@@ -982,6 +999,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         reply: 'Ready to generate your itinerary?',
         stageNext: 'generate_suggestions',
         input: { type: 'options', options: ['Generate itinerary'] },
+        quickOptions: ['Generate itinerary'],
         state: { pace: payload?.message || 'Balanced' },
       };
     }
@@ -1274,6 +1292,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         if (data?.stageNext && data.stageNext !== stage) setStage(data.stageNext);
         if (data?.input) setInputSpec(data.input);
         if (Array.isArray(data?.quickOptions)) setQuickOptions(data.quickOptions);
+        else if (Array.isArray(data?.input?.options)) setQuickOptions(data.input.options);
         if (data?.state) setFlowState(prev => ({ ...prev, ...data.state }));
         const assistantMsg = {
           content: data?.reply || data?.message,
@@ -1842,13 +1861,50 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         stage={stage}
                         hints={latestHints}
                         onSubmit={async (value) => {
-                          // The `StageInput` component now just submits a value.
-                          // `sendMessage` handles all the logic of constructing and sending the payload.
-                          const messageText = typeof value === 'string' ? value : JSON.stringify(value);
+                          // Accept either a raw string or an object { value, stageOverride }
+                          let messageText = value;
+                          let stageOverride;
+                          if (typeof value === 'object' && value !== null && 'value' in value) {
+                            messageText = value.value;
+                            stageOverride = value.stageOverride;
+                          }
+                          messageText = typeof messageText === 'string' ? messageText : JSON.stringify(messageText);
+
+                            // Special-case: for the initial intent buttons, don't send the literal label
+                            // to the backend as user input when advancing to input stages. Otherwise the
+                            // server (or our own pre-processing) may treat the label as a real location/region
+                            // and skip the expected free-text prompt.
+                            const normalized = messageText.trim().toLowerCase();
+                            if (stageOverride === 'input_locations' && normalized === 'i have specific locations') {
+                              // Echo choice and advance locally to the locations input prompt without hitting the backend yet
+                              pushMessage(activeId, 'user', 'I have specific locations');
+                              setStage('input_locations');
+                              setInputSpec({ type: 'freeText', placeholder: 'Type cities/places (comma-separated)…' });
+                              setQuickOptions([]);
+                              // Add an assistant prompt so the UI shows the follow-up question
+                              pushMessage(activeId, 'assistant', {
+                                content: 'Please share your destinations (comma-separated). For example: Paris, Lyon',
+                                nextStage: 'input_locations',
+                                inputSpec: { type: 'freeText', placeholder: 'Type cities/places (comma-separated)…' }
+                              });
+                              return;
+                            }
+                            if (stageOverride === 'input_region' && normalized === 'i only know a region') {
+                              pushMessage(activeId, 'user', 'I only know a region');
+                              setStage('input_region');
+                              setInputSpec({ type: 'freeText', placeholder: 'Type a region, e.g., Southern France' });
+                              setQuickOptions([]);
+                              pushMessage(activeId, 'assistant', {
+                                content: 'Which region are you considering? (e.g., Southern France)',
+                                nextStage: 'input_region',
+                                inputSpec: { type: 'freeText', placeholder: 'Type a region, e.g., Southern France' }
+                              });
+                              return;
+                            }
                           if (messageText === 'Generate itinerary') {
                             await generateItineraryDirect();
                           } else {
-                            await sendMessage(messageText);
+                            await sendMessage(messageText, stageOverride);
                           }
                         }}
                       />
@@ -1880,7 +1936,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         onKeyPress={handleKey} 
                         minRows={1} 
                         maxRows={6} 
-                        placeholder={stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...'} 
+                        placeholder={inputSpec?.placeholder || (stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...')} 
                         className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" 
                         disabled={isTyping}
                       />
