@@ -1,14 +1,21 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import SpaceBackground from '../components/SpaceBackground.jsx'
+import { useDevSettings } from '../context/DevSettingsContext.jsx'
 import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
 import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
+  const { settings } = useDevSettings();
+  const showBg = settings.devMode ? settings.showSpaceBg !== false : true;
+  const showSplash = settings.devMode ? settings.showSplashLoader !== false : true;
+  const showLanding = settings.devMode ? settings.showLandingStart !== false : true;
+  const enableWormhole = settings.devMode ? settings.enableWormhole !== false : true;
+  const startAtChat = settings.devMode ? !!settings.startAtChat : false;
   const [currentView, setCurrentView] = useState('loading')
   const [showTitle, setShowTitle] = useState(false)
   const [showButton, setShowButton] = useState(false)
@@ -22,11 +29,21 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
 
   const handleStartJourney = () => {
     setIsAnimating(true)
-    setShowWormhole(true)
-    setTimeout(() => { setShowWormhole(false); setCurrentView('final'); setIsAnimating(false); }, 4000)
+    if (enableWormhole) {
+      setShowWormhole(true)
+      setTimeout(() => { setShowWormhole(false); setCurrentView('final'); setIsAnimating(false); }, 4000)
+    } else {
+      setCurrentView('final');
+      setIsAnimating(false);
+    }
   }
 
   const handleLoadingComplete = () => {
+    // decide what the next view should be, considering toggles
+    if (startAtChat || !showLanding) {
+      setCurrentView('final')
+      return;
+    }
     setCurrentView('main')
     setTimeout(() => { setShowTitle(true); setTimeout(() => setShowButton(true), 800) }, 500)
   }
@@ -40,19 +57,34 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
     try { setIsSidebarOpen(false) } catch {}
   }
 
+  // Auto-progress out of loading on mount if splash is disabled or startAtChat set
+  useEffect(() => {
+    if (currentView === 'loading') {
+      if (!showSplash) {
+        handleLoadingComplete();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSplash]);
+
 
   return (
     <>
-      {/* Background */}
-      <SpaceBackground isAnimating={false} />
-
-      {/* Loader */}
-      {currentView === 'loading' && (
-        <SimpleLoader onLoadingComplete={handleLoadingComplete} />
+      {/* Background (dev toggle) */}
+      {showBg && (
+        <SpaceBackground isAnimating={false} />
       )}
 
+      {/* Loader */}
+      {currentView === 'loading' && showSplash && (
+        <SimpleLoader onLoadingComplete={handleLoadingComplete} />
+      )}
+      {/* If splash is disabled, move to the next step after mount */}
+      {/* We avoid calling state setters during render; use an effect instead */}
+      {currentView === 'loading' && !showSplash && null}
+
       {/* Main */}
-      {currentView === 'main' && (
+      {currentView === 'main' && showLanding && (
         <div className="fixed inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
           <div className="text-center mb-12">
             <h1 ref={titleRef} className={`text-white font-light tracking-widest transition-all duration-150 ${isAnimating ? 'opacity-0' : showTitle ? 'opacity-100' : 'opacity-0'}`} style={{ fontSize: '5vw', fontWeight: 200, letterSpacing: '0.5rem', textShadow: '0 0 15px rgba(173, 216, 230, 0.7)' }}>VOYAGER.AI</h1>
@@ -116,7 +148,7 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
       )}
 
       {/* Simple wormhole overlay */}
-      {showWormhole && (
+      {showWormhole && enableWormhole && (
         <div className="fixed inset-0 z-[9999] bg-black grid place-items-center">
           <div className="relative h-64 w-64">
             <div className="absolute inset-0 rounded-full border-2 border-sky-500/30 animate-ping"></div>

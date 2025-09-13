@@ -6,12 +6,15 @@ import HomeClient from './app/HomeClient.jsx';
 import SimpleLoader from './components/Loader.jsx';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './lib/firebaseClient';
+import { useDevSettings } from './context/DevSettingsContext.jsx';
 
 function AppContent() {
   const { currentUser, loading } = useAuth();
   const [needsOnboarding, setNeedsOnboarding] = React.useState(true);
   const [checkingOnboarding, setCheckingOnboarding] = React.useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const { settings } = useDevSettings();
+  const showOnboarding = settings.devMode ? settings.showOnboarding : true;
 
   React.useEffect(() => {
     let mounted = true;
@@ -35,14 +38,14 @@ function AppContent() {
     return () => { mounted = false; };
   }, [currentUser]);
 
-  if (loading || checkingOnboarding) return <FullPageLoader />;
+  if (loading || (checkingOnboarding && showOnboarding)) return <FullPageLoader />;
 
   return (
     <div className="min-h-screen bg-black">
       <main className="pt-0">
         {!currentUser ? (
           <AuthPage />
-        ) : needsOnboarding ? (
+        ) : (needsOnboarding && showOnboarding) ? (
           <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
         ) : (
           <HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />

@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
+import { useDevSettings } from '../context/DevSettingsContext.jsx';
 
 // Enhanced StageInput component with advanced date selection and pace options
 const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints }) => {
@@ -820,6 +821,7 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
 };
 
 export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {}, onItineraryGenerated }) {
+  const { settings } = useDevSettings();
   const { currentUser } = useAuth();
   const fullNameOrEmail = currentUser?.displayName || currentUser?.email || '';
   const shortName = (() => {
@@ -903,10 +905,117 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   // Resolve API base with production safeguards
   const base = getApiBase();
   const apiMisconfigured = isApiMisconfiguredForHosting();
+
+  // Local mock helpers when useGeminiApi is false
+  const devMockReply = (payload) => {
+    // simple rule-based canned responses for testing
+    const s = (payload?.stage || stage);
+    if (s === 'greeting') {
+      return {
+        reply: `Hello${firstName ? ', ' + firstName : ''}! I can plan your trip. Do you have specific locations or just a region in mind?`,
+        stageNext: 'ask_intent',
+        input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
+      };
+    }
+    if (s === 'input_locations') {
+      // If we don't have locations yet, prompt for them
+      let existing = payload?.state?.locations;
+      let fromMsg = (payload?.message || '').trim();
+      let parsed = [];
+      if (fromMsg && fromMsg.toLowerCase() !== 'i have specific locations') {
+        parsed = fromMsg
+          .split(/[\n,]+/)
+          .map(x => x.trim())
+          .filter(Boolean);
+      }
+      const locations = Array.isArray(existing) && existing.length ? existing : parsed;
+      if (!locations.length) {
+        return {
+          reply: 'Please share your destinations (comma-separated). For example: Paris, Lyon',
+          stageNext: 'input_locations',
+          input: { type: 'freeText', placeholder: 'Type cities/places, e.g., Paris, Lyon' }
+        };
+      }
+      return {
+        reply: 'Great! How many days are you planning?',
+        stageNext: 'ask_duration',
+        input: { type: 'days' },
+        state: { locations }
+      };
+    }
+    if (s === 'input_region') {
+      // If we don't have a region yet, prompt for one
+      const existing = (payload?.state?.region || '').trim();
+      const fromMsg = (payload?.message || '').trim();
+      const region = existing || (fromMsg && fromMsg.toLowerCase() !== 'i only know a region' ? fromMsg : '');
+      if (!region) {
+        return {
+          reply: 'Which region are you considering? (e.g., Southern France)',
+          stageNext: 'input_region',
+          input: { type: 'freeText', placeholder: 'Type a region, e.g., Southern France' }
+        };
+      }
+      return {
+        reply: 'Nice choice. How many days are you planning?',
+        stageNext: 'ask_duration',
+        input: { type: 'days' },
+        state: { region }
+      };
+    }
+    if (s === 'ask_duration') {
+      return {
+        reply: 'Noted! Want to pick exact dates?',
+        stageNext: 'ask_dates',
+        input: { type: 'dates' },
+        state: { durationDays: payload?.state?.durationDays }
+      };
+    }
+    if (s === 'ask_dates') {
+      return {
+        reply: 'Thanks, almost done. Choose your travel pace:',
+        stageNext: 'ask_pace',
+        input: { type: 'options', options: ['Relaxed', 'Balanced', 'Action-Packed'] },
+      };
+    }
+    if (s === 'ask_pace') {
+      return {
+        reply: 'Ready to generate your itinerary?',
+        stageNext: 'generate_suggestions',
+        input: { type: 'options', options: ['Generate itinerary'] },
+        state: { pace: payload?.message || 'Balanced' },
+      };
+    }
+    // default fallback
+    return {
+      reply: 'Acknowledged. Continue...',
+      stageNext: 'greeting',
+      input: { type: 'options', options: ['I have specific locations', 'I only know a region'] }
+    };
+  };
+
+  const devMockItinerary = (st) => {
+    const loc = (st?.locations && st.locations[0]) || st?.region || 'your destination';
+    const days = st?.durationDays || 3;
+    let md = `# ${days}-Day Plan for ${loc}\n\n`;
+    for (let d = 1; d <= days; d++) {
+      md += `## Day ${d}\n- Morning: Explore a landmark\n- Afternoon: Local cafe and stroll\n- Evening: Scenic viewpoint\n\n`;
+    }
+    md += `\n> Mock itinerary generated locally (Gemini disabled).`;
+    return md;
+  };
   
   // Generate a catchy chat title using backend AI endpoint
   const updateChatTitle = async (tripOverride = {}) => {
     try {
+      if (settings.devMode && !settings.useGeminiApi) {
+        const title = (() => {
+          const loc = (tripOverride.locations?.[0]) || flowState.locations?.[0] || flowState.region || 'Trip';
+          const days = tripOverride.durationDays || flowState.durationDays || '';
+          return `${loc}${days ? ` • ${days}d` : ''}`;
+        })();
+        setChats(prev => prev.map(c => c.id === activeId ? { ...c, title } : c));
+        return;
+      }
       const token = await getFirebaseIdToken();
       const payload = { tripState: { ...flowState, ...tripOverride } };
       let res = await fetch(`${base}/api/journeys/title`, {
@@ -962,10 +1071,24 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       // Show the user's click in the transcript if not already present
       pushMessage(chatId, 'user', 'Generate itinerary');
       const token = await getFirebaseIdToken();
-      if (!token && currentUser == null) {
+      if (!token && currentUser == null && (settings.devMode && settings.useGeminiApi)) {
         pushMessage(chatId, 'assistant', {
           content: 'Please sign in to generate an itinerary.'
         });
+        return;
+      }
+
+      if (settings.devMode && !settings.useGeminiApi) {
+        // Mock locally and open canvas
+        const markdown = devMockItinerary(flowState);
+        if (typeof onItineraryGenerated === 'function') {
+          onItineraryGenerated({ markdown, plannedDays: flowState?.durationDays || null });
+          pushMessage(chatId, 'assistant', { content: 'Mock itinerary ready — opening the canvas.' });
+        } else {
+          pushMessage(chatId, 'assistant', { content: markdown });
+        }
+        setStage('iterate');
+        setInputSpec({ type: 'freeText' });
         return;
       }
       let res = await fetch(`${base}/api/itinerary`, {
@@ -1109,7 +1232,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         return;
       }
       const token = await getFirebaseIdToken();
-      if (!token && currentUser == null) {
+      if (!token && currentUser == null && (settings.devMode && settings.useGeminiApi)) {
         pushMessage(chatId, 'assistant', {
           content: 'Please sign in to continue the chat.'
         });
@@ -1142,6 +1265,27 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
         state: { ...flowState },
       };
+
+      if (settings.devMode && !settings.useGeminiApi) {
+        // Simulate a small delay and return a local response
+        await new Promise(r => setTimeout(r, 300));
+        const data = devMockReply({ stage: stageToSend, message: msg, state: { ...flowState } });
+        // Update stage/input as real handler does
+        if (data?.stageNext && data.stageNext !== stage) setStage(data.stageNext);
+        if (data?.input) setInputSpec(data.input);
+        if (Array.isArray(data?.quickOptions)) setQuickOptions(data.quickOptions);
+        if (data?.state) setFlowState(prev => ({ ...prev, ...data.state }));
+        const assistantMsg = {
+          content: data?.reply || data?.message,
+          currentStage: data?.stageNext || stage,
+          nextStage: data?.stageNext,
+          inputSpec: data?.input,
+        };
+        pushMessage(chatId, 'assistant', assistantMsg);
+        setIsTyping(false);
+        sendingRef.current = false;
+        return;
+      }
 
       let res = await fetch(`${base}/api/chat`, {
         method: 'POST',
@@ -1600,9 +1744,14 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         {/* Main chat area: full-height flex column so input stays at bottom */}
         <main className="flex-1 overflow-hidden relative flex flex-col min-h-0" style={{ height: '100vh' }}>
           {/* Connection/auth status banner */}
-          {apiMisconfigured && (
+          {(apiMisconfigured && !(settings.devMode && !settings.useGeminiApi)) && (
             <div className="mx-auto max-w-3xl mt-3 mb-0 p-3 rounded-lg border border-yellow-400/40 bg-yellow-500/10 text-yellow-100 text-xs">
               Backend not configured for production. Set VITE_API_BASE to your live API URL before building and deploying.
+            </div>
+          )}
+          {(settings.devMode && !settings.useGeminiApi) && (
+            <div className="mx-auto max-w-3xl mt-3 mb-0 p-3 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 text-xs">
+              Mock mode: Gemini API calls are disabled. Using local responses.
             </div>
           )}
           <div
@@ -1643,6 +1792,38 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           {/* Composer pinned to bottom inside the main column */}
           <div className="sticky bottom-0 left-0 right-0 flex justify-center pointer-events-none" style={{ paddingBottom: '8px' }}>
             <div className="pointer-events-auto max-w-3xl w-full px-4">
+              {(settings.devMode && settings.showAutoChatButton) && (
+                <div className="flex justify-end mb-2">
+                  <button
+                    onClick={async () => {
+                      // A fast demo script to auto-walk through the flow
+                      if (sendingRef.current) return;
+                      const flow = async () => {
+                        await sendMessage('', 'greeting');
+                        await new Promise(r => setTimeout(r, 200));
+                        await handleQuick('I have specific locations');
+                        await new Promise(r => setTimeout(r, 200));
+                        // Now provide locations as free text so the prompt is visible
+                        await sendMessage('Paris, Lyon', 'input_locations');
+                        await new Promise(r => setTimeout(r, 200));
+                        setFlowState(prev => ({ ...prev, durationDays: 4 }));
+                        await sendMessage('4', 'ask_duration');
+                        await new Promise(r => setTimeout(r, 200));
+                        await sendMessage('2025-03-01', 'ask_dates');
+                        await new Promise(r => setTimeout(r, 200));
+                        await sendMessage('Balanced', 'ask_pace');
+                        await new Promise(r => setTimeout(r, 200));
+                        await generateItineraryDirect();
+                      };
+                      try { await flow(); } catch {}
+                    }}
+                    className="px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20 border border-white/10 text-xs"
+                    title="Auto walk-through"
+                  >
+                    ▶ Auto Chat
+                  </button>
+                </div>
+              )}
               <AnimatePresence mode="wait">
                 {inputSpec && (inputSpec.type === 'options' || inputSpec.type === 'multiselect' || inputSpec.type === 'dates' || inputSpec.type === 'days') ? (
                   <motion.div 
