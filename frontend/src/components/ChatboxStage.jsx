@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+// NOTE: ChatMessage component extracted (lightweight) in ChatMessage.jsx; existing inline rendering retained for now.
 import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { getApiBase, isApiMisconfiguredForHosting } from '../lib/apiBase';
 import { useAuth } from '../context/AuthContext';
-import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2, Sparkles, Wand2 } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
-import EnhancedChatMessage from './EnhancedChatMessage.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
 
 // Enhanced StageInput component with advanced date selection and pace options
@@ -850,8 +850,6 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId), [chats, activeId]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [typingText, setTypingText] = useState('');
-  const [isTypingComplete, setIsTypingComplete] = useState(false);
   // Frontend is a dumb renderer; backend provides stage/inputSpec/quickOptions
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
@@ -936,46 +934,6 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       if (!nextTitle) return;
       setChats(prev => prev.map(c => c.id === activeId ? { ...c, title: nextTitle, subtitle: data?.subtitle } : c));
     } catch {}
-  };
-
-  // Generate dynamic chat name based on conversation context
-  const generateDynamicChatName = async (messageContent, stage) => {
-    try {
-      const token = await getFirebaseIdToken();
-      const payload = { 
-        message: messageContent,
-        stage: stage,
-        flowState: flowState,
-        user: currentUser ? { displayName: firstName } : null
-      };
-      
-      let res = await fetch(`${base}/api/chat/name`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
-      });
-      
-      if (res.status === 401 || res.status === 403) {
-        const fresh = await getFirebaseIdToken(true);
-        if (fresh) {
-          res = await fetch(`${base}/api/chat/name`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${fresh}` },
-            body: JSON.stringify(payload),
-          });
-        }
-      }
-      
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.name || null;
-    } catch (error) {
-      console.error('Failed to generate chat name:', error);
-      return null;
-    }
   };
   
   // Generate itinerary via dedicated API, bypassing chat generation to save cost
@@ -1274,19 +1232,6 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   contextUsed: data?.contextUsed,
       };
 
-      // Start typing animation
-      setIsTyping(true);
-      setTypingText(data?.reply || data?.message || '');
-      setIsTypingComplete(false);
-
-      // Generate dynamic chat name if this is early in conversation
-      if (activeChat?.messages?.length <= 2 && msg) {
-        const dynamicName = await generateDynamicChatName(msg, stage);
-        if (dynamicName) {
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: dynamicName } : c));
-        }
-      }
-
       pushMessage(chatId, 'assistant', assistantMsg);
 
       // If the server provided itinerary card items, render them as a separate assistant message
@@ -1495,60 +1440,42 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           className={`border-r border-white/8 bg-gradient-to-b from-black/30 to-black/20 backdrop-blur-xl px-3 py-4 flex flex-col items-stretch min-h-0 overflow-hidden`}
           style={{ height: '100vh' }}
         >
-          {/* Enhanced Sidebar header */}
-          <div className={`mb-4 px-1 ${isSidebarOpen ? 'block' : 'flex flex-col items-center gap-2'}`}>
+          {/* Sidebar header */}
+          <div className={`mb-3 px-1 ${isSidebarOpen ? 'block' : 'flex flex-col items-center gap-2'}`}>
             {isSidebarOpen ? (
               <>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   <button
-                    className="p-2 rounded-lg text-white/80 hover:bg-white/10 transition-all duration-200 hover:scale-105"
-                    title="Collapse sidebar"
+                    className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                    title="Collapse"
                     onClick={() => setIsSidebarOpen && setIsSidebarOpen(false)}
                   >
                     <Menu className="w-5 h-5" />
                   </button>
-                  <div className="flex items-center gap-2">
-                    <Wand2 className="w-4 h-4 text-purple-400" />
-                    <span className="text-xs text-white/60">AI Powered</span>
                 </div>
-                </div>
-                <motion.div 
-                  className="mt-6 flex flex-col items-center text-center px-0"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <div className="relative">
+                <div className="mt-4 flex flex-col items-center text-center px-0">
                   <img src="/logo-secondary.png" alt="Voyager brand" className="h-16 w-16 rounded-full object-contain" />
-                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-gray-900 animate-pulse"></div>
+                  <div className="mt-3">
+                    <div className="text-3xl font-semibold tracking-tight leading-tight">Voyager.ai</div>
+                    <div className="text-sm text-white/70 mt-1">Welcome, {firstName || 'Traveler'}</div>
                   </div>
-                  <div className="mt-4">
-                    <div className="text-2xl font-bold tracking-tight leading-tight bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">
-                      Voyager.ai
                 </div>
-                    <div className="text-sm text-white/70 mt-1 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" />
-                      Welcome, {firstName || 'Traveler'}
-                    </div>
-                  </div>
-                </motion.div>
               </>
             ) : (
               <>
                 <button
-                  className="p-2 rounded-lg text-white/80 hover:bg-white/10 transition-all duration-200 hover:scale-105"
-                  title="Expand sidebar"
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Expand"
                   onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
                 >
                   <Menu className="w-5 h-5" />
                 </button>
                 <button
-                  className="p-1.5 rounded-lg text-white/90 hover:bg-white/10 transition-all duration-200 hover:scale-105 relative"
-                  title="Expand sidebar"
+                  className="p-1.5 rounded-lg text-white/90 hover:bg-white/10"
+                  title="Expand"
                   onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
                 >
                   <img src="/logo-secondary.png" alt="Voyager" className="h-9 w-9 rounded-full object-contain" />
-                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border border-gray-900 animate-pulse"></div>
                 </button>
               </>
             )}
@@ -1598,69 +1525,51 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           </div>
 
           <div className="w-full mb-4">
-            <motion.button 
+            <button 
               onClick={newChat} 
-              className={`w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 ${isSidebarOpen ? 'px-4 py-3 text-sm' : 'p-2'} font-semibold text-white shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center gap-2 hover:scale-105`}
-              title="Start New Journey"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              className={`w-full rounded-lg bg-gradient-to-r from-[#16a34a] to-[#10b981] ${isSidebarOpen ? 'px-4 py-2 text-sm' : 'p-2'} font-semibold text-black shadow-sm hover:shadow-md transition-shadow flex items-center justify-center`}
+              title="New Journey"
             >
-              {isSidebarOpen ? (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  New Journey
-                </>
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
-            </motion.button>
+              {isSidebarOpen ? '+ New Journey' : '+'}
+            </button>
           </div>
 
           <div className="w-full border-t border-white/6 pt-3 mt-2 space-y-2 overflow-y-auto flex-1 min-h-0">
             {(() => {
               const q = search.trim().toLowerCase();
               const visible = q ? chats.filter((c) => (c.title || '').toLowerCase().includes(q)) : chats;
-              return visible.map((c, index) => (
-                <motion.div
+              return visible.map((c) => (
+                <div
                   key={c.id}
-                  className={`rounded-xl ${isSidebarOpen ? 'px-3 py-2 text-sm' : 'p-2'} transition-all duration-200 flex items-center ${
+                  className={`rounded-lg ${isSidebarOpen ? 'px-2 py-1.5 text-sm' : 'p-2'} transition-colors flex items-center ${
                     isSidebarOpen ? 'justify-between' : 'justify-center'
-                  } ${c.id === activeId ? 'bg-gradient-to-r from-white/10 to-white/5 text-white border border-white/20 shadow-lg' : 'text-white/70 hover:bg-white/5 hover:border-white/10 border border-transparent'}`}
+                  } ${c.id === activeId ? 'bg-white/6 text-white' : 'text-white/70 hover:bg-white/3'}`}
                   title={c.title}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  whileHover={{ scale: 1.02 }}
                 >
                   <button
                     className={`${isSidebarOpen ? 'flex-1 text-left truncate' : 'flex items-center justify-center w-full'}`}
                     onClick={() => setActiveId(c.id)}
                   >
                     {isSidebarOpen ? (
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-400 to-teal-500"></div>
-                        <span className="truncate block pr-2 font-medium">{c.title}</span>
-                      </div>
+                      <span className="truncate block pr-2">{c.title}</span>
                     ) : (
                       <MapPin className="w-4 h-4" />
                     )}
                   </button>
                   {isSidebarOpen && (
-                    <motion.button
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         const confirmDelete = c.messages?.length ? confirm('Delete this chat? This cannot be undone.') : true;
                         if (confirmDelete) deleteChat(c.id);
                       }}
                       title="Delete chat"
-                      className="ml-2 p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-red-500/20 transition-all duration-200"
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
+                      className="ml-2 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/10"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </motion.button>
+                    </button>
                   )}
-                </motion.div>
+                </div>
               ));
             })()}
           </div>
@@ -1708,43 +1617,23 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
             <div className="mx-auto max-w-3xl pt-2">
         {activeChat?.messages?.map((m, i) => (
                 <div key={i}>
-                  <EnhancedChatMessage 
-                    message={m} 
-                    userName={fullNameOrEmail} 
-                    onCopy={handleCopy} 
-                    onRegenerate={handleRegenerate}
-                    isTyping={isTyping && i === activeChat.messages.length - 1}
-                    typingText={typingText}
-                    onTypingComplete={() => {
-                      setIsTyping(false);
-                      setIsTypingComplete(true);
-                    }}
-                  />
+          <ChatMessage message={m} userName={fullNameOrEmail} onCopy={handleCopy} onRegenerate={handleRegenerate} />
                 </div>
               ))}
 
-              {isTyping && !isTypingComplete && (
-                <motion.div 
-                  className="my-4 flex items-start gap-4"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-400/30 overflow-hidden backdrop-blur-sm">
-                    <img src="/logo.png" alt="Voyager" className="h-8 w-8 object-contain animate-pulse" />
-                  </div>
-                  <div className="w-full max-w-[720px] rounded-3xl px-6 py-5 text-sm bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-xl border border-slate-700/50 text-white shadow-2xl shadow-slate-900/20">
+              {isTyping && (
+                <div className="my-4 flex items-start gap-4">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/6 border border-white/10 overflow-hidden">
+                      <img src="/logo.png" alt="Voyager" className="h-8 w-8 object-contain animate-pulse" />
+                    </div>
+                  <div className="w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white">
                     <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
-                      <span className="text-white/80">Voyager is crafting your response...</span>
-                    </div>
-                    <div className="mt-3 flex items-center gap-1">
-                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse"></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               )}
 
               <div ref={endRef} />
@@ -1763,7 +1652,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                     exit={{ opacity: 0, y: 30 }} 
                     transition={{ duration: 0.18 }}
                   >
-                    <div className="rounded-3xl bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-4 shadow-xl">
+                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
                       <StageInput
                         inputSpec={inputSpec}
                         quickOptions={quickOptions}
@@ -1803,30 +1692,24 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         </button>
                       </div>
                     ) : null}
-                    <div className="rounded-3xl bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-4 flex items-center gap-3 shadow-xl">
+                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
                       <TextareaAutosize 
                         value={input} 
                         onChange={(e) => setInput(e.target.value)} 
                         onKeyPress={handleKey} 
                         minRows={1} 
                         maxRows={6} 
-                        placeholder={stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Ask me anything about your dream trip...'} 
-                        className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-white placeholder-slate-400 outline-none text-sm" 
+                        placeholder={stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...'} 
+                        className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" 
                         disabled={isTyping}
                       />
-                      <motion.button 
+                      <button 
                         onClick={() => sendMessage(input)} 
                         disabled={isTyping || !input.trim()} 
-                        className={`ml-auto rounded-2xl px-4 py-2 font-semibold transition-all duration-200 ${
-                          input.trim() && !isTyping
-                            ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg hover:shadow-xl hover:scale-105'
-                            : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
-                        }`}
-                        whileHover={input.trim() && !isTyping ? { scale: 1.05 } : {}}
-                        whileTap={input.trim() && !isTyping ? { scale: 0.95 } : {}}
+                        className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                       >
                         <Send size={16} />
-                      </motion.button>
+                      </button>
                     </div>
                   </motion.div>
                 )}

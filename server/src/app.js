@@ -6,7 +6,6 @@ import { authMiddleware } from './middleware/auth.js';
 
 // Routes
 import chatRouter from './routes/chat.js';
-import chatNameRouter from './routes/chatName.js';
 import suggestRouter from './routes/suggest.js';
 import itineraryRouter from './routes/itinerary.js';
 import journeysRouter from './routes/journeys.js';
@@ -39,7 +38,6 @@ export function buildApp() {
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
   app.use('/api/chat', authMiddleware, chatRouter);
-  app.use('/api/chat/name', authMiddleware, chatNameRouter);
   app.use('/api/suggest', authMiddleware, suggestRouter);
   app.use('/api/itinerary', authMiddleware, itineraryRouter);
   app.use('/api/destinations', authMiddleware, destinationsRouter);
