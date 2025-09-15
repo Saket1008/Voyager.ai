@@ -7,6 +7,8 @@ import SimpleLoader from './components/Loader.jsx';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './lib/firebaseClient';
 import { useDevSettings } from './context/DevSettingsContext.jsx';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import ProfilePage from './pages/ProfilePage.jsx';
 
 function AppContent() {
   const { currentUser, loading } = useAuth();
@@ -48,7 +50,11 @@ function AppContent() {
         ) : (needsOnboarding && showOnboarding) ? (
           <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
         ) : (
-          <HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+          <Routes>
+            <Route path="/" element={<HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         )}
       </main>
     </div>

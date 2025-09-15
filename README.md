@@ -144,6 +144,28 @@ Set up Clerk authentication:
 - Ensure all `.env` files are properly configured
 - Check that the Gemini API key is valid
 
+### AI Usage and Quota Controls
+
+To minimize API quota usage while keeping the experience rich, the server supports two environment-driven toggles:
+
+- `CHAT_USE_AI` (default: `false`)
+	- When `false`, the chat flow runs in a local-first deterministic mode on the server and does not call the AI during conversation. The assistant still guides users through the essential steps (doorstep vs destination, destination input, duration, dates, travelers, confirm, then generate).
+	- Set to `true` only if you want AI-driven conversational turns during chat. Expect higher quota usage.
+
+- `ITINERARY_USE_AI` (default: `true`)
+	- When `true`, itinerary generation calls the AI once per unique trip input. Responses are cached in-memory to avoid repeated calls.
+	- When `false`, the server generates a deterministic, non-AI itinerary as a fallback. Useful for demos, tests, or when conserving quota.
+
+Suggested settings for development and demos with minimal quota:
+
+```env
+# server/.env
+CHAT_USE_AI=false
+ITINERARY_USE_AI=true  # set to false to completely avoid AI during generation
+```
+
+The server also caches itineraries in-memory keyed by a normalized trip signature. If you want a fresh generation for the same inputs, change one of the trip parameters (e.g., dates or destinations) or restart the server to clear the cache.
+
 **Installation problems:**
 ```bash
 # Clean install

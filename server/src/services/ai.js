@@ -5,6 +5,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // --- Configuration & Lazy Initialization ---
 let _genAI = null;
 let _cachedKey = null;
+const ITINERARY_USE_AI = String(process.env.ITINERARY_USE_AI || 'true').toLowerCase() === 'true';
+// Simple in-memory cache for itineraries (keyed by stable trip signature)
+const _itineraryCache = new Map();
 function getModel() {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
@@ -17,6 +20,48 @@ function getModel() {
   }
   const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
   return _genAI.getGenerativeModel({ model: modelName });
+}
+
+// --- Helpers to condense context for Gemini ---
+function createTripStateSummary(tripState = {}) {
+  // Keep only the most relevant, high-signal fields to avoid prompt bloat
+  const t = tripState || {};
+  const summary = {};
+  if (t.doorstep !== undefined) summary.doorstep = t.doorstep; // boolean or choice
+  if (t.destination) summary.destination = t.destination;
+  if (Array.isArray(t.locations) && t.locations.length) summary.locations = t.locations;
+  if (t.region) summary.region = t.region;
+  if (t.duration || t.durationDays) summary.duration = t.duration || t.durationDays;
+  if (t.startDate || t.endDate || t.dates) {
+    summary.dates = {
+      startDate: t.startDate || null,
+      endDate: t.endDate || null,
+      raw: t.dates || null,
+    };
+  }
+  if (t.travelers) summary.travelers = t.travelers;
+  if (t.transportationMode) summary.transportationMode = t.transportationMode;
+  if (t.accommodationStyle) summary.accommodationStyle = t.accommodationStyle;
+  if (t.foodBudget) summary.foodBudget = t.foodBudget;
+  if (t.budget) summary.budget = t.budget; // legacy compatibility
+  if (t.activities) summary.activities = t.activities;
+  if (t.notes) summary.notes = t.notes;
+  return summary;
+}
+
+function summarizeDNA(dna = {}) {
+  try {
+    if (!dna || typeof dna !== 'object') return '';
+    const parts = [];
+    if (dna.pace) parts.push(`pace: ${dna.pace}`);
+    if (dna.budget) parts.push(`budget: ${dna.budget}`);
+    if (Array.isArray(dna.interests) && dna.interests.length) parts.push(`interests: ${dna.interests.slice(0, 6).join(', ')}`);
+    if (dna.diet) parts.push(`diet: ${dna.diet}`);
+    if (dna.style) parts.push(`style: ${dna.style}`);
+    return parts.join(' • ');
+  } catch {
+    return '';
+  }
 }
 
 // --- Core Conversational Flow (The Stage Machine) ---
@@ -152,16 +197,122 @@ export async function generateChat({ stage = STAGES.greeting, message = '', stat
 
 // --- AI-Powered Functions (Slower, deliberate calls) ---
 
-async function callGemini({ prompt }) {
+/**
+ * Core Gemini call helper.
+ * Modes:
+ * - Legacy (default): pass { prompt } and receive raw text (back-compat for suggestions/itinerary/title).
+ * - Structured Next-Step mode: pass { prompt, tripState, chatHistory } to receive a parsed JSON object:
+ *   { assistantReply: string, nextQuestion: { type, prompt, currentValue? } }
+ */
+export async function callGemini({ prompt, tripState, chatHistory, userProfileDNA }) {
   const model = getModel();
-  console.log('[Gemini] Prompt START\n' + prompt + '\n[Gemini] Prompt END');
+
+  // Detect structured next-step mode when tripState/chatHistory are provided (non-undefined)
+  const structuredMode = typeof tripState !== 'undefined' || typeof chatHistory !== 'undefined';
+
+  if (!structuredMode) {
+    // Legacy, plain-text mode
+    console.log('[Gemini] Prompt START\n' + prompt + '\n[Gemini] Prompt END');
+    try {
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      console.log('[Gemini] Raw response START\n' + text + '\n[Gemini] Raw response END');
+      return text;
+    } catch (err) {
+      console.error('[Gemini] Error during generateContent:', err?.message);
+      if (err?.stack) console.error(err.stack);
+      throw err;
+    }
+  }
+
+  // Structured JSON mode for dynamic next-step generation
+  const safeState = tripState ?? {};
+  const dna = userProfileDNA && typeof userProfileDNA === 'object' ? userProfileDNA : ((safeState && safeState.dna) ? safeState.dna : {});
+  const recentHistory = Array.isArray(chatHistory) ? chatHistory.slice(-4) : [];
+  const historyLines = recentHistory
+    .map(m => `${m.sender || m.role || 'user'}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+    .join('\n');
+
+  const condensedTrip = createTripStateSummary(safeState);
+  const isInitialInteraction = !condensedTrip.destination && !condensedTrip.region && recentHistory.length === 0;
+  const dnaBlock = isInitialInteraction
+    ? `User's Permanent Travel DNA (full):\n${JSON.stringify(dna, null, 2)}`
+    : `User's DNA (summary): ${summarizeDNA(dna)}`;
+
+  const masterPrompt = `
+You are Voyager.AI, an intelligent, concise, and friendly travel assistant. Your job is to ask ONLY the most important next question, minimize typing, and keep the flow fast.
+
+${dnaBlock}
+
+Current Trip State (condensed):
+${JSON.stringify(condensedTrip, null, 2)}
+
+Recent Conversation (last ${recentHistory.length} turns):
+${historyLines}
+
+User's Latest Input:
+${prompt}
+
+CRITICAL Guidance:
+- Prioritize core info first: doorstep vs destination start, destination/region, dates (or duration), travelers.
+- Offer structured choices instead of open text whenever reasonable (multiChoice with options).
+- Infer from DNA when possible; don't re-ask what's implied by DNA unless user disagrees.
+- Consolidate related queries. Avoid granular logistics (car model, exact distances, flight numbers) unless explicitly requested.
+- Replies must be brief and not repeat all known details. Ask one clear question or confirm.
+
+Your response MUST be VALID JSON with exactly two fields:
+1) "assistantReply": string — a concise sentence or two.
+2) "nextQuestion": object — the next action.
+   - "type": one of ["doorstepChoice", "destination", "duration", "dates", "travelers", "multiChoice", "confirm", "generate", "freeText"].
+     * Use "doorstepChoice" only if the trip's starting mode is unknown (is the trip from their doorstep, or starting at the destination?).
+     * Use "multiChoice" when offering predefined options (e.g., transportation, accommodation).
+     * Use "confirm" to summarize before generating.
+     * Use "generate" when all essential info is ready and the itinerary can be created now.
+   - "prompt": string — short label or question.
+   - "currentValue": string|number|null — value known from trip state, if any.
+   - "options": string[] — ONLY include when type is "multiChoice" or "doorstepChoice".
+
+Initial Flow (if starting mode unknown):
+- Ask "doorstepChoice" with options like ["Start from Doorstep", "Start at Destination"].
+- Then collect destination/region, duration, dates, travelers.
+
+After Core Info:
+- Transportation (multiChoice): ["Car", "Flight", "Train", "Bus", "Other"]. If "Car", do not ask car model/year; only ask practical timing if truly needed.
+- Accommodation style (multiChoice): ["Guesthouse", "Homestay", "Hotel", "Airbnb", "Hostel", "Other"].
+- Food budget (multiChoice): ["Low", "Mid-Range", "High", "Specific Amount"].
+- Activities: infer from DNA; otherwise a brief multiChoice or succinct freeText prompt.
+- Once ready, return type="confirm"; after user confirms, return type="generate".
+
+Begin your JSON now.`;
+
+  console.log('[Gemini][Structured] Prompt START\n' + masterPrompt + '\n[Gemini][Structured] Prompt END');
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    console.log('[Gemini] Raw response START\n' + text + '\n[Gemini] Raw response END');
-    return text;
+    const result = await model.generateContent(masterPrompt);
+    const raw = result.response.text();
+    console.log('[Gemini][Structured] Raw response START\n' + raw + '\n[Gemini][Structured] Raw response END');
+
+    // Normalize fenced blocks if present
+    const cleaned = String(raw).replace(/```json\n?|```/g, '').trim();
+
+    // Try direct parse first
+    try {
+      return JSON.parse(cleaned);
+    } catch (parseError) {
+      console.warn('[Gemini JSON Parse Warning]:', parseError?.message);
+      // Attempt to extract first JSON object
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          return JSON.parse(m[0]);
+        } catch (e2) {
+          console.error('[Gemini JSON Recovery Failed]:', e2?.message);
+        }
+      }
+      console.error('Raw Gemini Response (truncated):', cleaned.slice(0, 500));
+      throw new Error('AI returned invalid JSON: ' + cleaned.substring(0, 200));
+    }
   } catch (err) {
-    console.error('[Gemini] Error during generateContent:', err?.message);
+    console.error('[Gemini][Structured] Error during generateContent:', err?.message);
     if (err?.stack) console.error(err.stack);
     throw err;
   }
@@ -264,9 +415,43 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
     return md;
   }
 
+  // Compute deterministic cache key (stable across field order)
+  const cacheKey = (() => {
+    try {
+      const canonical = {
+        locations: Array.isArray(trip.locations) ? trip.locations : (trip.locations ? [trip.locations] : []),
+        region: trip.region || null,
+        durationDays: Number(trip.durationDays) || null,
+        startDate: trip.startDate || null,
+        endDate: trip.endDate || null,
+        travelers: Number(trip.travelers) || null,
+        pace: dna.pace || null,
+        budget: dna.budget || null,
+        interests: Array.isArray(dna.interests) ? dna.interests.slice(0,6) : [],
+        diet: dna.diet || null,
+      };
+      return JSON.stringify(canonical);
+    } catch { return null; }
+  })();
+
+  if (cacheKey && _itineraryCache.has(cacheKey)) {
+    return _itineraryCache.get(cacheKey);
+  }
+
   try {
+    // If AI is disabled for itinerary, return deterministic fallback immediately
+    if (!ITINERARY_USE_AI) {
+      const fb = buildFallbackItinerary();
+      if (cacheKey) _itineraryCache.set(cacheKey, fb);
+      return fb;
+    }
+
     const md = await callGemini({ prompt });
-    if (!md || typeof md !== 'string') return buildFallbackItinerary();
+    if (!md || typeof md !== 'string') {
+      const fb = buildFallbackItinerary();
+      if (cacheKey) _itineraryCache.set(cacheKey, fb);
+      return fb;
+    }
 
     const lower = md.toLowerCase();
     const locs = trip.locations && trip.locations.length ? trip.locations : [];
@@ -281,12 +466,17 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
 
     if (!anchorOk) {
       console.warn('[Itinerary] Output failed anchor validation. Using fallback.');
-      return buildFallbackItinerary();
+      const fb = buildFallbackItinerary();
+      if (cacheKey) _itineraryCache.set(cacheKey, fb);
+      return fb;
     }
+    if (cacheKey) _itineraryCache.set(cacheKey, md);
     return md;
   } catch (err) {
     console.error('[Itinerary] Generation failed:', err.message);
-    return buildFallbackItinerary();
+    const fb = buildFallbackItinerary();
+    if (cacheKey) _itineraryCache.set(cacheKey, fb);
+    return fb;
   }
 }
 

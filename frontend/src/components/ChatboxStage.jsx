@@ -4,13 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { getApiBase, isApiMisconfiguredForHosting } from '../lib/apiBase';
 import { useAuth } from '../context/AuthContext';
-import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2 } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2, ThumbsUp, ThumbsDown, Pencil } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
 import { useDevSettings } from '../context/DevSettingsContext.jsx';
+import DaySelector from './DaySelector.jsx';
+import DatePicker from './DatePicker.jsx';
+import ConfirmSummary from './ConfirmSummary.jsx';
 
 // Enhanced StageInput component with advanced date selection and pace options
 const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints }) => {
@@ -26,6 +29,9 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
   const [showDurationWarning, setShowDurationWarning] = useState(false);
   const [originalDays, setOriginalDays] = useState(null);
   const [pendingDuration, setPendingDuration] = useState(null);
+  // Inline custom input support for options lists ("Other…")
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherText, setOtherText] = useState('');
 
   // Debug logging
   useEffect(() => {
@@ -104,9 +110,9 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
 
   const handleDateSelect = (day) => {
     if (!day) return;
-  const selectedDate = new Date(calendarYear, calendarMonth, day);
-  const dateString = fmtLocalYMD(selectedDate);
-    
+    const selectedDate = new Date(calendarYear, calendarMonth, day);
+    const dateString = fmtLocalYMD(selectedDate);
+
     if (!uiStartDate || (uiStartDate && uiEndDate)) {
       // First click or resetting - set start date
       setUiStartDate(dateString);
@@ -119,7 +125,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
         setUiEndDate(dateString);
         const diffTime = selectedDate - start;
         const newDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-        
+
         // Check if duration changed significantly from original
         if (originalDays && Math.abs(newDays - originalDays) > 0) {
           setShowDurationWarning(true);
@@ -127,30 +133,25 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
         } else {
           setUiDays(newDays);
         }
-      } else {
-        // If selected date is before start date, make it the new start date
-        setUiStartDate(dateString);
-        setUiEndDate('');
-        setShowDurationWarning(false);
       }
     }
   };
 
+  // Handle accepting or rejecting a duration change when end date selection alters days
   const acceptDurationChange = () => {
-    setUiDays(pendingDuration);
+    if (pendingDuration && pendingDuration > 0) {
+      setUiDays(pendingDuration);
+    }
     setShowDurationWarning(false);
     setPendingDuration(null);
-    // Update the flow state to reflect the change
-    setFlowState(prev => ({ ...prev, durationDays: pendingDuration }));
   };
 
   const rejectDurationChange = () => {
-    // Reset to match original duration
-    if (uiStartDate && originalDays) {
+    if (uiStartDate && originalDays && originalDays > 0) {
       const start = new Date(uiStartDate);
-  const end = new Date(start);
-  end.setDate(start.getDate() + originalDays - 1);
-  setUiEndDate(fmtLocalYMD(end));
+      const end = new Date(start);
+      end.setDate(start.getDate() + originalDays - 1);
+      setUiEndDate(fmtLocalYMD(end));
       setUiDays(originalDays);
     }
     setShowDurationWarning(false);
@@ -257,6 +258,10 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     const hasDest = (Array.isArray(flowState?.locations) && flowState.locations.length > 0) || !!flowState?.region;
     const hasDuration = !!flowState?.durationDays || (flowState?.startDate && flowState?.endDate);
 
+    const [otherOpen, setOtherOpen] = React.useState(false);
+    const [otherText, setOtherText] = React.useState('');
+    const showOther = !opts.some(o => String(o).toLowerCase() === 'other');
+
     return (
       <div className="space-y-4">
         <div className={`${centerSingle ? 'grid grid-cols-1 place-items-center' : `grid ${gridCols}`} gap-4`}>
@@ -283,6 +288,32 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               <div className="text-xs opacity-75 mt-1 text-white/70">{descriptionFor(opt)}</div>
             </button>
           ))}
+          {showOther && (
+            <div className="flex flex-col gap-2 p-4 rounded-xl bg-white/5 border border-white/20">
+              {!otherOpen ? (
+                <button
+                  className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 text-sm border border-white/20"
+                  onClick={() => setOtherOpen(true)}
+                  disabled={isTyping}
+                >Other…</button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    className="flex-1 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white/90 placeholder-white/50 text-sm"
+                    placeholder="Type your own answer"
+                    value={otherText}
+                    onChange={(e) => setOtherText(e.target.value)}
+                    disabled={isTyping}
+                  />
+                  <button
+                    className="px-3 py-2 rounded-lg bg-[#19c37d] text-black font-semibold disabled:opacity-50"
+                    onClick={() => { if (otherText.trim()) handleSubmit(otherText.trim()); }}
+                    disabled={isTyping || !otherText.trim()}
+                  >Send</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {requiresGuard && !hasDest && (
           <div className="text-center text-xs text-white/70">Add at least one destination or a region first.</div>
@@ -340,9 +371,37 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
   if (inputSpec?.type === 'days') {
     return (
       <div className="space-y-6">
+        {/* Quick Day Selector component for streamlined input */}
+        <div className="max-w-md mx-auto">
+          {(() => {
+            // Build suggestions: include defaults and optionally a numeric hint
+            const hinted = (() => {
+              const raw = hints?.recommended_days;
+              if (!raw) return null;
+              const m = String(raw).match(/\d+/);
+              return m ? parseInt(m[0], 10) : null;
+            })();
+            const base = [3, 5, 7, 10];
+            const sugg = Array.from(new Set([...(hinted ? [hinted] : []), ...base]));
+            return (
+              <DaySelector
+                currentValue={uiDays}
+                onValueChange={(v) => setUiDays(parseInt(String(v || 0), 10) || 1)}
+                suggestedDurations={sugg}
+                onSelect={(d) => {
+                  const val = parseInt(String(d || 0), 10) || 1;
+                  setUiDays(val);
+                  // Confirm immediately for faster flow
+                  handleSubmit(val);
+                }}
+              />
+            );
+          })()}
+        </div>
+
         <div className="text-center">
           <div className="text-white/80 text-sm mb-4">How many days are you planning?</div>
-          <div className="flex items-center justify-center gap-4 mb-4">
+          <div className="flex items-center justify-center gap-4 mb-2">
             <button
               onClick={() => setUiDays(Math.max(1, uiDays - 1))}
               className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors text-xl font-bold"
@@ -359,6 +418,17 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
               +
             </button>
           </div>
+          {latestHints?.recommended_days && (
+            <div className="text-center text-xs text-emerald-200 mb-3">
+              Suggested by AI: <button
+                className="underline hover:no-underline"
+                onClick={() => {
+                  const n = parseInt(String(latestHints.recommended_days).match(/\d+/)?.[0] || '');
+                  if (n) setUiDays(n);
+                }}
+              >{latestHints.recommended_days} days</button>
+            </div>
+          )}
         </div>
 
         {hints?.recommended_days && (
@@ -416,6 +486,56 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
     return (
       <div className="space-y-6">
         <div className="text-center text-white/80 text-sm">Plan your travel dates</div>
+
+        {/* Inline simplified DatePicker for quick selection */}
+        <div className="max-w-2xl mx-auto">
+          {hints?.best_months && (
+            <div className="mb-2 text-center">
+              <span className="inline-block text-[11px] px-2 py-1 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-200">
+                Best months: {hints.best_months}
+              </span>
+            </div>
+          )}
+          {(() => {
+            const suggestedMonths = (() => {
+              const raw = hints?.best_months;
+              if (!raw) return [];
+              // Split on commas or slashes; trim and remove empties
+              return String(raw).split(/[,/]| and /i).map(s => s.trim()).filter(Boolean);
+            })();
+            const handleDpSelect = (payload) => {
+              if (typeof payload !== 'string') return;
+              if (/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(payload)) {
+                const [s, e] = payload.split(' to ').map(x => x.trim());
+                setUiStartDate(s);
+                setUiEndDate(e);
+                try {
+                  const sd = new Date(s);
+                  const ed = new Date(e);
+                  const diff = Math.ceil((ed - sd) / (1000 * 60 * 60 * 24)) + 1;
+                  if (diff > 0) setUiDays(diff);
+                } catch {}
+                // Keep confirmation via existing Confirm button
+                return;
+              }
+              if (/^\d{4}-\d{2}-\d{2}$/.test(payload)) {
+                setUiStartDate(payload);
+                // Auto end date will be derived if uiDays is known via effect above
+                return;
+              }
+              // Otherwise treat as month/season preference text and send directly
+              onSubmit(payload);
+            };
+            return (
+              <DatePicker
+                startDate={uiStartDate}
+                duration={uiDays}
+                suggestedMonths={suggestedMonths}
+                onSelect={handleDpSelect}
+              />
+            );
+          })()}
+        </div>
         
         {/* Main layout: Left side (inputs + submit) and Right side (calendar + flexibility) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -779,15 +899,17 @@ const ItineraryCards = ({ items }) => {
   );
 };
 
-const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
+const ChatMessage = ({ index, message, userName, onCopy, onRegenerate, onReact, onEdit }) => {
   const isUser = message.role === 'user';
-  const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/6 backdrop-blur-md border border-white/10 text-white shadow-inner';
-  const userCls = 'ml-auto inline-block max-w-[70%] rounded-[18px] px-4 py-3 text-sm font-medium text-white bg-gradient-to-br from-[#16a34a] to-[#10b981] border border-white/10 shadow-inner';
+  const assistantCls = 'w-full max-w-[720px] rounded-[18px] px-6 py-5 text-sm bg-white/5 backdrop-blur-md border border-white/8 text-white shadow-inner';
+  const userCls = 'ml-auto inline-block max-w-[70%] rounded-[18px] px-4 py-3 text-sm font-medium text-white bg-gradient-to-br from-[#16a34a]/80 to-[#10b981]/80 border border-white/10 shadow-inner whitespace-pre-wrap break-words text-center leading-6';
   const [showThinking, setShowThinking] = React.useState(false);
   const hasThinking = !!message?.contextUsed;
 
+  const gapCls = isUser ? 'gap-3' : 'gap-4';
+
   return (
-    <div className={`flex items-start gap-4 my-6 ${isUser ? 'justify-end' : ''}`}>
+    <div className={`group/message flex items-start ${gapCls} my-6 ${isUser ? 'justify-end' : ''}`}>
       {!isUser && <Avatar role={message.role} />}
       <div>
         {message.type === 'itinerary-json' && Array.isArray(message.content) ? (
@@ -795,7 +917,19 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
             <ItineraryCards items={message.content} />
           </div>
         ) : isUser ? (
-          <div className={userCls}>{message.content}</div>
+          <div className="relative">
+            <div className={userCls}>{message.content}</div>
+            {/* Edit button on hover (user messages) */}
+            <div className="absolute -top-2 -right-2 opacity-0 group-hover/message:opacity-100 transition-opacity">
+              <button
+                onClick={() => onEdit?.(index)}
+                title="Edit"
+                className="h-8 w-8 rounded-md bg-white/5 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         ) : (
           <div>
             <div className={assistantCls}>
@@ -804,12 +938,19 @@ const ChatMessage = ({ message, userName, onCopy, onRegenerate }) => {
               </div>
               {/* Per-new spec: remove centralized hints panel; hints now appear contextually in StageInput */}
             </div>
-            <div className="mt-2 flex items-center gap-2">
+            {/* Hover-only toolbar under assistant messages */}
+            <div className="mt-2 flex items-center gap-2 opacity-0 group-hover/message:opacity-100 transition-opacity pointer-events-none group-hover/message:pointer-events-auto">
               <button onClick={onRegenerate} title="Regenerate" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <RefreshCw className="w-4 h-4" />
               </button>
               <button onClick={() => onCopy(String(message.content ?? ''))} title="Copy" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
                 <Copy className="w-4 h-4" />
+              </button>
+              <button onClick={() => onReact?.(index, 'like')} title="Like" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+                <ThumbsUp className="w-4 h-4" />
+              </button>
+              <button onClick={() => onReact?.(index, 'dislike')} title="Dislike" className="h-8 w-8 rounded-md bg-white/6 border border-white/10 grid place-items-center text-white/90 hover:bg-white/10">
+                <ThumbsDown className="w-4 h-4" />
               </button>
               {hasThinking && (
                 <button
@@ -867,6 +1008,39 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId), [chats, activeId]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  // Dynamic flow: next question from backend
+  const [currentQuestionType, setCurrentQuestionType] = useState(null);
+  const [currentQuestionPrompt, setCurrentQuestionPrompt] = useState('');
+  const [currentQuestionCurrentValue, setCurrentQuestionCurrentValue] = useState(null);
+  const [currentQuestionOptions, setCurrentQuestionOptions] = useState([]);
+  // Simple local states for dynamic widgets
+  const [dynText, setDynText] = useState('');
+  const [dynDays, setDynDays] = useState(5);
+  const [dynStartDate, setDynStartDate] = useState('');
+  const [dynEndDate, setDynEndDate] = useState('');
+  const [dynTravelers, setDynTravelers] = useState(2);
+
+  // Prefill dynamic widgets when backend provides a current value
+  useEffect(() => {
+    if (currentQuestionType === 'destination' || currentQuestionType === 'freeText') {
+      if (typeof currentQuestionCurrentValue === 'string') setDynText(currentQuestionCurrentValue);
+    }
+    if (currentQuestionType === 'duration') {
+      const n = parseInt(currentQuestionCurrentValue, 10);
+      if (!Number.isNaN(n) && n > 0) setDynDays(n);
+    }
+    if (currentQuestionType === 'dates') {
+      if (currentQuestionCurrentValue && typeof currentQuestionCurrentValue === 'string' && currentQuestionCurrentValue.includes(' to ')) {
+        const [s, e] = currentQuestionCurrentValue.split(' to ').map(x => x.trim());
+        if (s) setDynStartDate(s);
+        if (e) setDynEndDate(e);
+      }
+    }
+    if (currentQuestionType === 'travelers') {
+      const n = parseInt(currentQuestionCurrentValue, 10);
+      if (!Number.isNaN(n) && n > 0) setDynTravelers(n);
+    }
+  }, [currentQuestionType, currentQuestionCurrentValue]);
   // Frontend is a dumb renderer; backend provides stage/inputSpec/quickOptions
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
@@ -877,6 +1051,23 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const lastAssistantStageRef = useRef({});
   const endRef = useRef(null);
   const sendingRef = useRef(false); // Prevent concurrent sends
+
+  // Minimal toast helper
+  const showToast = (text) => {
+    try {
+      const root = document.getElementById('toast-root');
+      if (!root) return;
+      const el = document.createElement('div');
+      el.className = 'px-3 py-1.5 rounded-md text-xs text-white bg-white/10 border border-white/15 backdrop-blur-md';
+      el.textContent = text;
+      root.appendChild(el);
+      setTimeout(() => {
+        el.style.transition = 'opacity 300ms';
+        el.style.opacity = '0';
+        setTimeout(() => root.removeChild(el), 320);
+      }, 1200);
+    } catch {}
+  };
 
   // Debug: Log current state to understand question/option mismatch
   console.log('🔍 ChatboxStage State Debug:', {
@@ -927,7 +1118,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     const s = (payload?.stage || stage);
     if (s === 'greeting') {
       return {
-        reply: `Hello${firstName ? ', ' + firstName : ''}! I can plan your trip. Do you have specific locations or just a region in mind?`,
+        reply: `Hey${firstName ? ' ' + firstName : ''}! I’m Voyager. Shall we start with specific locations you already have, or would you like me to suggest cities for a region?`,
         stageNext: 'ask_intent',
         input: { type: 'options', options: ['I have specific locations', 'I only know a region'] },
         quickOptions: ['I have specific locations', 'I only know a region'],
@@ -1014,9 +1205,28 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const devMockItinerary = (st) => {
     const loc = (st?.locations && st.locations[0]) || st?.region || 'your destination';
     const days = st?.durationDays || 3;
+    const morning = [
+      'Explore a landmark',
+      'Guided walking tour',
+      'Neighborhood coffee crawl',
+      'Museum highlights'
+    ];
+    const afternoon = [
+      'Local cafe and stroll',
+      'Riverfront promenade',
+      'Food market tastings',
+      'Biking through scenic areas'
+    ];
+    const evening = [
+      'Scenic viewpoint',
+      'Sunset by the waterfront',
+      'Live music venue',
+      'Street food night'
+    ];
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     let md = `# ${days}-Day Plan for ${loc}\n\n`;
     for (let d = 1; d <= days; d++) {
-      md += `## Day ${d}\n- Morning: Explore a landmark\n- Afternoon: Local cafe and stroll\n- Evening: Scenic viewpoint\n\n`;
+      md += `## Day ${d}\n- Morning: ${pick(morning)}\n- Afternoon: ${pick(afternoon)}\n- Evening: ${pick(evening)}\n\n`;
     }
     md += `\n> Mock itinerary generated locally (Gemini disabled).`;
     return md;
@@ -1218,6 +1428,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
     const chatId = activeId;
     const msg = text.trim();
+    // Determine stage as early as possible; used in logging/pushMessage metadata
+    const stageToSend = stageOverride || stage || 'greeting';
 
     if (!msg && !stageOverride) {
       sendingRef.current = false;
@@ -1236,7 +1448,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       // Add user message
       const prevMessage = activeChat?.messages?.[activeChat.messages.length - 1];
       if (msg && (!prevMessage || prevMessage.role !== 'user' || prevMessage.content !== msg)) {
-        pushMessage(chatId, 'user', msg);
+        // Attach the stage at send time for future edits
+        pushMessage(chatId, 'user', { content: msg, stageAtSend: stageToSend });
       }
       setInput('');
       setIsTyping(true);
@@ -1258,9 +1471,9 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         sendingRef.current = false;
         return;
       }
-      const stageToSend = stageOverride || stage || 'greeting';
+  // stageToSend already computed above
 
-      // Persist destinations/region when using the free-text composer
+      // Persist destinations/region when using the free-text composer or destination stage
     if (stageToSend === 'input_locations' && msg) {
         const locations = msg.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
         if (locations.length) {
@@ -1274,14 +1487,30 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           setFlowState(prev => ({ ...prev, region }));
       updateChatTitle({ region });
         }
+      } else if ((stageToSend === 'destination' || currentQuestionType === 'destination') && msg) {
+        const locations = msg.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+        if (locations.length) {
+          setFlowState(prev => ({ ...prev, locations }));
+          updateChatTitle({ locations });
+        }
+      }
+
+      // Build dynamic chat payload for new backend contract
+      const history = (activeChat?.messages || []).map(m => ({
+        sender: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content : (m?.content?.text || JSON.stringify(m.content))
+      }));
+
+      // Ensure lastQuestionType is included in tripState
+      const flowToSend = { ...flowState };
+      if (currentQuestionType) {
+        flowToSend.lastQuestionType = currentQuestionType;
       }
 
       const payload = {
-        mode: 'chat',
-        message: msg,
-        stage: stageToSend,
-        user: currentUser ? { uid: currentUser.uid, displayName: firstName } : null,
-        state: { ...flowState },
+        userMessage: msg,
+        currentTripState: flowToSend,
+        chatHistory: history,
       };
 
       if (settings.devMode && !settings.useGeminiApi) {
@@ -1366,40 +1595,48 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         }
       }
 
-      // Update stage and inputSpec
-      if (data?.stageNext && data.stageNext !== stage) {
-        setStage(data.stageNext);
+      // New dynamic response handling
+  const assistantMessage = data?.assistantMessage || data?.assistantReply || data?.message || '';
+  let nextType = data?.nextQuestionType || data?.nextQuestion?.type || null;
+  const nextPrompt = data?.nextQuestionPrompt || data?.nextQuestion?.prompt || '';
+  const nextCurrent = (data?.nextQuestionCurrentValue !== undefined) ? data?.nextQuestionCurrentValue : (data?.nextQuestion?.currentValue ?? null);
+  const newState = data?.newTripState || data?.tripState || null;
+  const nextOptions = data?.nextQuestionOptions || data?.nextQuestion?.options || [];
+  const nextHints = data?.nextQuestionHints || data?.nextQuestion?.hints || null;
+
+      if (assistantMessage) {
+        pushMessage(chatId, 'assistant', { content: assistantMessage });
       }
-      if (data?.input) {
+
+      if (newState && typeof newState === 'object') {
+        setFlowState(newState);
+      }
+      setLatestHints(nextHints || null);
+
+      // Normalize type for common prompts (map freeText prompts to concrete types)
+      if ((!nextType || nextType === 'freeText') && nextPrompt) {
+        const p = String(nextPrompt).toLowerCase();
+        if (p.includes('budget')) nextType = 'budget';
+      }
+
+      // Respect an `input` spec the server may provide (e.g., doorstep choice)
+      if (data?.input && typeof data.input === 'object') {
         setInputSpec(data.input);
       }
-      if (Array.isArray(data?.quickOptions)) {
-        setQuickOptions(data.quickOptions);
-      }
-      if (data?.state) {
-        setFlowState(prev => ({ ...prev, ...data.state }));
-      }
 
-      if (data?.hints) {
-        setLatestHints(data.hints);
-      }
+  setCurrentQuestionType(nextType);
+      setCurrentQuestionPrompt(nextPrompt || '');
+      setCurrentQuestionCurrentValue(nextCurrent ?? null);
+  setCurrentQuestionOptions(Array.isArray(nextOptions) ? nextOptions : []);
 
-      // Build assistant message (markdown or plain text)
-      const assistantMsg = {
-        content: data?.reply || data?.message,
-        suggestions: data?.suggestions,
-        inputSpec: data?.input,
-        currentStage: data?.stageNext || stage,
-        nextStage: data?.stageNext,
-        hints: data?.hints,
-  contextUsed: data?.contextUsed,
-      };
-
-      pushMessage(chatId, 'assistant', assistantMsg);
-
-      // If the server provided itinerary card items, render them as a separate assistant message
-      if (Array.isArray(data?.itineraryItems) && data.itineraryItems.length) {
-        pushMessage(chatId, 'assistant', { type: 'itinerary-json', content: data.itineraryItems });
+      // Persist for next turn
+      if (nextType) {
+        setFlowState(prev => ({ 
+          ...prev, 
+          lastQuestionType: nextType,
+          lastQuestionPrompt: nextPrompt || '',
+          lastQuestionOptions: Array.isArray(nextOptions) ? nextOptions : undefined,
+        }));
       }
 
     } catch (err) {
@@ -1421,7 +1658,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       
       // We send a message with an empty text content but a specific 'greeting' stage.
       // The backend will see the 'greeting' stage and know to send the initial welcome message.
-      sendMessage('', 'greeting');
+      sendMessage('Hello Voyager!', 'greeting');
     }
     // The dependency array ensures this logic re-evaluates ONLY when the active chat instance changes.
     // The guards inside the 'if' statement prevent it from re-sending the greeting.
@@ -1563,7 +1800,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const handleCopy = (content) => {
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(content).then(() => {
-        // Could add a toast notification here
+        showToast('Copied');
       }).catch(err => {
         console.error('Failed to copy:', err);
       });
@@ -1591,6 +1828,64 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     
     // Resend the message
     await sendMessage(lastUserMsg.content);
+    try {
+      // Fire-and-forget feedback event
+      fetch(`${base}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'regenerate', messageIndex: lastUserMsgIndex, chatId: activeId })
+      }).catch(() => {});
+    } catch {}
+  };
+
+  // React to assistant message (like/dislike)
+  const handleReact = (idx, reaction) => {
+    setChats(prev => prev.map(c => {
+      if (c.id !== activeId) return c;
+      const msgs = [...(c.messages || [])];
+      if (!msgs[idx] || msgs[idx].role !== 'assistant') return c;
+      msgs[idx] = { ...msgs[idx], reaction };
+      return { ...c, messages: msgs };
+    }));
+    try {
+      const msg = activeChat?.messages?.[idx];
+      const snippet = (msg?.content || '').slice(0, 200);
+      fetch(`${base}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: reaction, messageIndex: idx, chatId: activeId, messageSnippet: snippet, stage })
+      }).catch(() => {});
+      showToast(reaction === 'like' ? 'Thanks for the feedback' : 'We’ll improve');
+    } catch {}
+  };
+
+  // Edit a user message: trim following messages, reset stage, and re-ask the question
+  const handleEditUserMessage = async (idx) => {
+    const messages = activeChat?.messages || [];
+    const msg = messages[idx];
+    if (!msg || msg.role !== 'user') return;
+    const stageToReask = msg.stageAtSend || 'greeting';
+    // Trim messages up to the message (exclude it so user can rewrite)
+    setChats(prev => prev.map(c => {
+      if (c.id !== activeId) return c;
+      return { ...c, messages: c.messages.slice(0, idx) };
+    }));
+    // Reset flow state to avoid conflicts beyond this point
+    setFlowState({});
+    // Pre-fill the composer with the original text for editing
+    setInput(String(msg.content || ''));
+    // Ask the question again via backend or mocks
+    try {
+      await sendMessage('', stageToReask);
+    } catch {}
+    try {
+      const msgSnippet = String(msg.content || '').slice(0, 200);
+      fetch(`${base}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'edit', messageIndex: idx, chatId: activeId, messageSnippet: msgSnippet, stage: stageToReask })
+      }).catch(() => {});
+    } catch {}
   };
 
   return (
@@ -1747,6 +2042,15 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                   <div className="text-xs text-white/60">{currentUser ? 'Member' : 'Not signed in'}</div>
                 </div>
               )}
+              {isSidebarOpen && (
+                <button
+                  onClick={() => { try { window.history.pushState({}, '', '/profile'); window.dispatchEvent(new PopStateEvent('popstate')); } catch { window.location.href = '/profile'; } }}
+                  title="Profile"
+                  className="ml-auto rounded-md p-2 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                >
+                  Profile
+                </button>
+              )}
               {isSidebarOpen && currentUser && (
                 <button
                   onClick={() => { try { signOut(auth); } catch (e) { console.error('Sign out error:', e); } }}
@@ -1785,7 +2089,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
             <div className="mx-auto max-w-3xl pt-2">
         {activeChat?.messages?.map((m, i) => (
                 <div key={i}>
-          <ChatMessage message={m} userName={fullNameOrEmail} onCopy={handleCopy} onRegenerate={handleRegenerate} />
+          <ChatMessage index={i} message={m} userName={fullNameOrEmail} onCopy={handleCopy} onRegenerate={handleRegenerate} onReact={handleReact} onEdit={handleEditUserMessage} />
                 </div>
               ))}
 
@@ -1818,21 +2122,22 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                       // A fast demo script to auto-walk through the flow
                       if (sendingRef.current) return;
                       const flow = async () => {
-                        await sendMessage('', 'greeting');
+                        // Local-first deterministic flow
+                        await sendMessage('Start at the destination'); // doorstepChoice
                         await new Promise(r => setTimeout(r, 200));
-                        await handleQuick('I have specific locations');
+                        await sendMessage('Palitana'); // destination
                         await new Promise(r => setTimeout(r, 200));
-                        // Now provide locations as free text so the prompt is visible
-                        await sendMessage('Paris, Lyon', 'input_locations');
+                        await sendMessage('3'); // duration days
                         await new Promise(r => setTimeout(r, 200));
-                        setFlowState(prev => ({ ...prev, durationDays: 4 }));
-                        await sendMessage('4', 'ask_duration');
+                        const start = '2025-10-01';
+                        const end = '2025-10-03';
+                        await sendMessage(`${start} to ${end}`); // dates range
                         await new Promise(r => setTimeout(r, 200));
-                        await sendMessage('2025-03-01', 'ask_dates');
+                        await sendMessage('2'); // travelers
                         await new Promise(r => setTimeout(r, 200));
-                        await sendMessage('Balanced', 'ask_pace');
+                        await sendMessage('yes'); // confirm
                         await new Promise(r => setTimeout(r, 200));
-                        await generateItineraryDirect();
+                        await generateItineraryDirect(); // generate
                       };
                       try { await flow(); } catch {}
                     }}
@@ -1844,7 +2149,207 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                 </div>
               )}
               <AnimatePresence mode="wait">
-                {inputSpec && (inputSpec.type === 'options' || inputSpec.type === 'multiselect' || inputSpec.type === 'dates' || inputSpec.type === 'days') ? (
+                {currentQuestionType ? (
+                  <motion.div 
+                    key={`dyn-${currentQuestionType}`}
+                    initial={{ opacity: 0, y: 30 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    exit={{ opacity: 0, y: 30 }} 
+                    transition={{ duration: 0.18 }}
+                  >
+                    <div className="rounded-xl bg-white/5 backdrop-blur-md p-4 border border-white/10">
+                      {currentQuestionPrompt ? (
+                        <div className="text-white/80 text-sm mb-3">{currentQuestionPrompt}</div>
+                      ) : null}
+
+                      {/* doorstepChoice / multiChoice */}
+                      {(currentQuestionType === 'doorstepChoice' || (currentQuestionType === 'multiChoice' && currentQuestionOptions.length > 0)) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {(currentQuestionOptions.length ? currentQuestionOptions : ['Start from my doorstep','Start at the destination']).map((opt, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => sendMessage(String(opt))}
+                              disabled={isTyping}
+                              className="px-4 py-3 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-white/90 text-sm text-left"
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* destination/freeText */}
+                      {(currentQuestionType === 'destination' || currentQuestionType === 'freeText' || currentQuestionType === 'budget') && (
+                        <div className="flex items-center gap-3">
+                          <TextareaAutosize
+                            value={dynText}
+                            onChange={(e) => setDynText(e.target.value)}
+                            minRows={1}
+                            maxRows={6}
+                            placeholder={currentQuestionPrompt || 'Type your answer...'}
+                            className="w-full resize-none bg-transparent py-3 px-4 text-gray-200 placeholder-gray-400 outline-none text-sm rounded-lg border border-white/10"
+                            disabled={isTyping}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                const v = dynText.trim();
+                                if (v) { sendMessage(v); setDynText(''); }
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => { setDynText(t => t.trim()); if (dynText.trim()) { sendMessage(dynText.trim()); setDynText(''); } }}
+                            disabled={isTyping || !dynText.trim()}
+                            className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                          >
+                            <Send size={16} />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* duration */}
+                      {currentQuestionType === 'duration' && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-4 flex-wrap">
+                            <div className="flex items-center gap-4">
+                              <button onClick={() => setDynDays(d => Math.max(1, d - 1))} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl">−</button>
+                              <div className="text-2xl font-bold text-white min-w-[4rem] px-4 py-2 bg-white/10 rounded-xl border border-white/20 text-center">{dynDays}</div>
+                              <button onClick={() => setDynDays(d => d + 1)} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl">+</button>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {[2,3,4,5,7,10,14].map((d) => (
+                                <button
+                                  key={d}
+                                  onClick={() => { setDynDays(d); sendMessage(String(d)); }}
+                                  className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white/90 text-xs border border-white/15"
+                                  disabled={isTyping}
+                                >{d} days</button>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => sendMessage(String(dynDays))}
+                            className="w-full px-8 py-3 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-medium hover:from-green-600 hover:to-emerald-700 transition-all"
+                          >Continue</button>
+                        </div>
+                      )}
+
+                      {/* dates */}
+                      {currentQuestionType === 'dates' && (
+                        <div className="space-y-4">
+                          {/* Suggested months */}
+                          <div className="flex items-center flex-wrap gap-2">
+                            {(() => {
+                              const today = new Date();
+                              const suggestions = [];
+                              for (let i = 0; i < 6; i++) {
+                                const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
+                                const y = d.getFullYear();
+                                const m = String(d.getMonth() + 1).padStart(2,'0');
+                                const label = d.toLocaleString('default', { month: 'short', year: 'numeric' });
+                                suggestions.push({ y, m, label });
+                              }
+                              const knownDays = parseInt(flowState?.durationDays || flowState?.duration, 10);
+                              return suggestions.map(({ y, m, label }) => (
+                                <button
+                                  key={`${y}-${m}`}
+                                  onClick={() => {
+                                    const start = `${y}-${m}-01`;
+                                    setDynStartDate(start);
+                                    if (!Number.isNaN(knownDays) && knownDays > 1) {
+                                      const s = new Date(start);
+                                      const e = new Date(s);
+                                      e.setDate(s.getDate() + (knownDays - 1));
+                                      const ey = e.getFullYear();
+                                      const em = String(e.getMonth() + 1).padStart(2,'0');
+                                      const ed = String(e.getDate()).padStart(2,'0');
+                                      setDynEndDate(`${ey}-${em}-${ed}`);
+                                    } else {
+                                      setDynEndDate('');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white/90 text-xs border border-white/15"
+                                  disabled={isTyping}
+                                >{label}</button>
+                              ));
+                            })()}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs text-white/70 mb-1">Start Date</label>
+                              <input type="date" value={dynStartDate} onChange={e => {
+                                const v = e.target.value; setDynStartDate(v);
+                                // Auto-suggest end date if duration known and end not set
+                                const days = parseInt(flowState?.durationDays || flowState?.duration, 10);
+                                if (v && !dynEndDate && !Number.isNaN(days) && days > 1) {
+                                  const start = new Date(v);
+                                  const end = new Date(start);
+                                  end.setDate(start.getDate() + (days - 1));
+                                  const y = end.getFullYear();
+                                  const m = String(end.getMonth() + 1).padStart(2,'0');
+                                  const d = String(end.getDate()).padStart(2,'0');
+                                  setDynEndDate(`${y}-${m}-${d}`);
+                                }
+                              }} className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-white/70 mb-1">End Date</label>
+                              <input type="date" value={dynEndDate} onChange={e => setDynEndDate(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white focus:border-blue-400 focus:outline-none" />
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const msgOut = dynStartDate && dynEndDate ? `${dynStartDate} to ${dynEndDate}` : (dynStartDate || dynEndDate || '');
+                              if (msgOut) sendMessage(msgOut);
+                            }}
+                            disabled={!dynStartDate && !dynEndDate}
+                            className="w-full px-8 py-3 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:from-green-600 hover:to-emerald-700 transition-all"
+                          >Confirm Dates</button>
+                        </div>
+                      )}
+
+                      {/* travelers */}
+                      {currentQuestionType === 'travelers' && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-center gap-4">
+                            <button onClick={() => setDynTravelers(n => Math.max(1, n - 1))} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl">−</button>
+                            <div className="text-2xl font-bold text-white min-w-[4rem] px-4 py-2 bg-white/10 rounded-xl border border-white/20 text-center">{dynTravelers}</div>
+                            <button onClick={() => setDynTravelers(n => n + 1)} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl">+</button>
+                          </div>
+                          <button
+                            onClick={() => sendMessage(String(dynTravelers))}
+                            className="w-full px-8 py-3 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-medium hover:from-green-600 hover:to-emerald-700 transition-all"
+                          >Continue</button>
+                        </div>
+                      )}
+
+                      {/* confirm */}
+                      {currentQuestionType === 'confirm' && (
+                        <div className="space-y-4">
+                          <ConfirmSummary flowState={flowState} />
+                          <div className="flex items-center justify-center gap-3">
+                            <button onClick={() => sendMessage('yes')} className="px-6 py-2 rounded-full bg-green-600 hover:bg-green-700 text-white font-semibold">Yes, Confirm</button>
+                            <button onClick={() => sendMessage('no')} className="px-6 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold">No, Revise</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* done */}
+                      {currentQuestionType === 'done' && (
+                        <div className="flex justify-center">
+                          <button onClick={generateItineraryDirect} className="px-8 py-3 rounded-full bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold hover:from-purple-600 hover:to-purple-700 transition-all">Generate Itinerary</button>
+                        </div>
+                      )}
+
+                      {/* generate */}
+                      {currentQuestionType === 'generate' && (
+                        <div className="flex justify-center">
+                          <button onClick={generateItineraryDirect} className="px-8 py-3 rounded-full bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold hover:from-purple-600 hover:to-purple-700 transition-all">Generate Itinerary</button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ) : inputSpec && (inputSpec.type === 'options' || inputSpec.type === 'multiselect' || inputSpec.type === 'dates' || inputSpec.type === 'days') ? (
                   <motion.div 
                     key={stage} 
                     initial={{ opacity: 0, y: 30 }} 
@@ -1933,7 +2438,12 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                       <TextareaAutosize 
                         value={input} 
                         onChange={(e) => setInput(e.target.value)} 
-                        onKeyPress={handleKey} 
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage(input);
+                          }
+                        }} 
                         minRows={1} 
                         maxRows={6} 
                         placeholder={inputSpec?.placeholder || (stage === 'finalize_details' ? 'Any must-sees or things to avoid? (optional) — or press No, Proceed' : 'Type your message...')} 
@@ -1955,6 +2465,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
           </div>
         </main>
       </div>
+      {/* Lightweight toast container */}
+      <div id="toast-root" className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[9999] space-y-2"></div>
     </div>
   );
 }
