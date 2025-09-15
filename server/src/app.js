@@ -11,6 +11,8 @@ import itineraryRouter from './routes/itinerary.js';
 import journeysRouter from './routes/journeys.js';
 import destinationsRouter from './routes/destinations.js';
 import whoamiRouter from './routes/whoami.js';
+import feedbackRouter from './routes/feedback.js';
+import profileRouter from './routes/profile.js';
 
 export function buildApp() {
   const app = express();
@@ -41,7 +43,9 @@ export function buildApp() {
   app.use('/api/suggest', authMiddleware, suggestRouter);
   app.use('/api/itinerary', authMiddleware, itineraryRouter);
   app.use('/api/destinations', authMiddleware, destinationsRouter);
+  app.use('/api/feedback', authMiddleware, feedbackRouter);
   app.use('/api/journeys', authMiddleware, journeysRouter);
+  app.use('/api/profile', authMiddleware, profileRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;
