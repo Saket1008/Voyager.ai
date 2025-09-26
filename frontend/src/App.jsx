@@ -9,6 +9,7 @@ import { db } from './lib/firebaseClient';
 import { useDevSettings } from './context/DevSettingsContext.jsx';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProfilePage from './pages/ProfilePage.jsx';
+import SpaceBackground from './components/SpaceBackground';
 
 function AppContent() {
   const { currentUser, loading } = useAuth();
@@ -44,11 +45,14 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-black">
-      <main className="pt-0">
+      {/* Global space background and aurora tint */}
+      <SpaceBackground isAnimating={false} />
+      <div className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(60%_50%_at_50%_0%,rgba(25,195,125,0.15),transparent_60%),radial-gradient(40%_40%_at_80%_20%,rgba(96,165,250,0.12),transparent_60%),radial-gradient(30%_30%_at_20%_10%,rgba(255,255,255,0.08),transparent_60%)]" />
+      <main className="relative z-10 pt-0">
         {!currentUser ? (
           <AuthPage />
         ) : (needsOnboarding && showOnboarding) ? (
-          <div className="min-h-screen p-4"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
+          <div className="min-h-screen"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>
         ) : (
           <Routes>
             <Route path="/" element={<HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />} />
@@ -63,7 +67,7 @@ function AppContent() {
 
 function FullPageLoader() {
   return (
-    <div className="min-h-screen grid place-items-center">
+    <div className="relative z-10 min-h-screen grid place-items-center">
       <SimpleLoader />
     </div>
   );

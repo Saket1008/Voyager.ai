@@ -573,6 +573,17 @@ const SpaceBackground = ({ isAnimating = false }) => {
     }
   }, [isAnimating, dimensions.width, dimensions.height]);
 
+  // Global celebration trigger via custom event
+  useEffect(() => {
+    const handler = () => {
+      if (dimensions.width > 0 && dimensions.height > 0) {
+        triggerExplosion(dimensions.width, dimensions.height);
+      }
+    };
+    window.addEventListener('spacebg:explode', handler);
+    return () => window.removeEventListener('spacebg:explode', handler);
+  }, [dimensions.width, dimensions.height]);
+
   return (
     <div className="fixed inset-0 pointer-events-none z-0">
       <canvas
