@@ -8,7 +8,7 @@ let _cachedKey = null;
 const ITINERARY_USE_AI = String(process.env.ITINERARY_USE_AI || 'true').toLowerCase() === 'true';
 // Simple in-memory cache for itineraries (keyed by stable trip signature)
 const _itineraryCache = new Map();
-function getModel() {
+function getModel(modelName) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
     throw new Error('Gemini API key not configured.');
@@ -18,8 +18,22 @@ function getModel() {
     _cachedKey = key;
     console.log('[Gemini] Client (re)initialized.');
   }
-  const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-  return _genAI.getGenerativeModel({ model: modelName });
+  const name = modelName || process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest';
+  return _genAI.getGenerativeModel({ model: name });
+}
+
+function getModelCandidates() {
+  const requested = (process.env.GEMINI_MODEL || '').trim() || 'gemini-1.5-flash-latest';
+  const cands = [requested];
+  // Add sensible fallbacks if the requested one is not found on this API version/region
+  if (!/\blatest\b/.test(requested)) cands.push(`${requested}-latest`);
+  // Prefer flash variants, then pro
+  if (!cands.includes('gemini-1.5-flash-latest')) cands.push('gemini-1.5-flash-latest');
+  if (!cands.includes('gemini-1.5-flash')) cands.push('gemini-1.5-flash');
+  if (!cands.includes('gemini-1.5-pro-latest')) cands.push('gemini-1.5-pro-latest');
+  if (!cands.includes('gemini-1.5-pro')) cands.push('gemini-1.5-pro');
+  // De-duplicate while preserving order
+  return Array.from(new Set(cands));
 }
 
 // --- Helpers to condense context for Gemini ---
@@ -205,21 +219,44 @@ export async function generateChat({ stage = STAGES.greeting, message = '', stat
  *   { assistantReply: string, nextQuestion: { type, prompt, currentValue? } }
  */
 export async function callGemini({ prompt, tripState, chatHistory, userProfileDNA }) {
-  const model = getModel();
-
   // Detect structured next-step mode when tripState/chatHistory are provided (non-undefined)
   const structuredMode = typeof tripState !== 'undefined' || typeof chatHistory !== 'undefined';
+
+  const tryGenerate = async (content, isStructured) => {
+    const models = getModelCandidates();
+    let lastErr;
+    for (const name of models) {
+      try {
+        const model = getModel(name);
+        console.log(`[Gemini] Using model: ${name}`);
+        const result = await model.generateContent(content);
+        return result;
+      } catch (err) {
+        const msg = String(err?.message || err || 'error');
+        const is404 = /404|not\s+found|not\s+supported|ListModels/i.test(msg);
+        console.warn(`[Gemini] generateContent failed for ${name}:`, msg);
+        lastErr = err;
+        if (is404) {
+          // Try next candidate silently
+          continue;
+        }
+        // For other errors (quota, network), do not keep retrying different names
+        break;
+      }
+    }
+    throw lastErr || new Error('Gemini call failed and no model fallback succeeded.');
+  };
 
   if (!structuredMode) {
     // Legacy, plain-text mode
     console.log('[Gemini] Prompt START\n' + prompt + '\n[Gemini] Prompt END');
     try {
-      const result = await model.generateContent(prompt);
+      const result = await tryGenerate(prompt, false);
       const text = result.response.text();
       console.log('[Gemini] Raw response START\n' + text + '\n[Gemini] Raw response END');
       return text;
     } catch (err) {
-      console.error('[Gemini] Error during generateContent:', err?.message);
+      console.error('[Gemini] Error during generateContent (after fallbacks):', err?.message);
       if (err?.stack) console.error(err.stack);
       throw err;
     }
@@ -287,7 +324,7 @@ Begin your JSON now.`;
 
   console.log('[Gemini][Structured] Prompt START\n' + masterPrompt + '\n[Gemini][Structured] Prompt END');
   try {
-    const result = await model.generateContent(masterPrompt);
+    const result = await tryGenerate(masterPrompt, true);
     const raw = result.response.text();
     console.log('[Gemini][Structured] Raw response START\n' + raw + '\n[Gemini][Structured] Raw response END');
 

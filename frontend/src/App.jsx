@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AuthPage from './pages/AuthPage';
 import OnboardingPage from './pages/OnboardingPage';
 import HomeClient from './app/HomeClient.jsx';
+import BeginJourney from './app/BeginJourney.jsx';
 import SimpleLoader from './components/Loader.jsx';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './lib/firebaseClient';
@@ -56,6 +57,7 @@ function AppContent() {
         ) : (
           <Routes>
             <Route path="/" element={<HomeClient isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />} />
+            <Route path="/begin" element={<BeginJourney />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

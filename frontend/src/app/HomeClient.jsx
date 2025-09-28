@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import SpaceBackground from '../components/SpaceBackground.jsx'
 import { useDevSettings } from '../context/DevSettingsContext.jsx'
@@ -10,6 +11,7 @@ import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
+  const navigate = useNavigate();
   const { settings } = useDevSettings();
   const showBg = settings.devMode ? settings.showSpaceBg !== false : true;
   const showSplash = settings.devMode ? settings.showSplashLoader !== false : true;
@@ -88,9 +90,16 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
         <div className="fixed inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
           <div className="text-center mb-12">
             <h1 ref={titleRef} className={`text-white font-light tracking-widest transition-all duration-150 ${isAnimating ? 'opacity-0' : showTitle ? 'opacity-100' : 'opacity-0'}`} style={{ fontSize: '5vw', fontWeight: 200, letterSpacing: '0.5rem', textShadow: '0 0 15px rgba(173, 216, 230, 0.7)' }}>VOYAGER.AI</h1>
-            <div className="mt-8 flex justify-center">
+            <div className="mt-8 flex justify-center gap-4">
               <button ref={buttonRef} onClick={handleStartJourney} className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} style={{ backdropFilter: 'blur(10px)' }}>
                 BEGIN YOUR JOURNEY
+              </button>
+              <button
+                onClick={() => navigate('/begin')}
+                className={`group relative bg-transparent border-2 border-cyan-300 text-cyan-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+              >
+                EXPLORE FEATURES
               </button>
             </div>
           </div>
