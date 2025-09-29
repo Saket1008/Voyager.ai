@@ -2,6 +2,7 @@ import React from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import OneClickItinerary from '../components/OneClickItinerary.jsx'
+import LocationAwarePanel from '../components/LocationAwarePanel.jsx'
 import {
   Compass,
   Globe,
@@ -121,6 +122,7 @@ export default function BeginJourney() {
   const navigate = useNavigate()
   const handleStart = () => navigate('/')
   const [showOneClickDemo, setShowOneClickDemo] = React.useState(false)
+  const [showLiveDemo, setShowLiveDemo] = React.useState(false)
 
   return (
     <div className="relative z-10 min-h-screen px-4 py-20 sm:px-6 lg:px-10">
@@ -182,14 +184,15 @@ export default function BeginJourney() {
             >
               {phase.features.map((f, i) => {
                 const isOneClick = phase.key === 'phase2' && /One\u2011?Click Itinerary|One-Click Itinerary/i.test(f.title)
+                const isLive = phase.key === 'phase2' && /Live Adventure Mode/i.test(f.title)
                 return (
                   <FeatureCard
                     key={`${phase.key}-${i}`}
                     icon={f.icon}
                     title={f.title}
                     desc={f.desc}
-                    onClick={isOneClick ? () => setShowOneClickDemo(v => !v) : undefined}
-                    interactive={isOneClick}
+                    onClick={isOneClick ? () => setShowOneClickDemo(v => !v) : (isLive ? () => setShowLiveDemo(v => !v) : undefined)}
+                    interactive={isOneClick || isLive}
                   />
                 )
               })}
@@ -199,16 +202,29 @@ export default function BeginJourney() {
             {phase.key === 'phase2' && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: showOneClickDemo ? 1 : 0.6, height: showOneClickDemo ? 'auto' : 0 }}
+                animate={{ opacity: (showOneClickDemo || showLiveDemo) ? 1 : 0.6, height: (showOneClickDemo || showLiveDemo) ? 'auto' : 0 }}
                 transition={{ duration: 0.35 }}
                 className={`overflow-hidden rounded-2xl border border-cyan-300/20 bg-white/5 backdrop-blur mt-5 ${showOneClickDemo ? 'p-4' : 'p-0'}`}
               >
-                {showOneClickDemo && (
-                  <div>
-                    <div className="mb-3 text-sm text-cyan-200/80">
-                      Live demo: generate an itinerary instantly using your saved Traveler DNA.
-                    </div>
-                    <OneClickItinerary />
+                {(showOneClickDemo || showLiveDemo) && (
+                  <div className="space-y-6">
+                    {showOneClickDemo && (
+                      <div>
+                        <div className="mb-3 text-sm text-cyan-200/80">
+                          Live demo: generate an itinerary instantly using your saved Traveler DNA.
+                        </div>
+                        <OneClickItinerary />
+                      </div>
+                    )}
+                    {showLiveDemo && (
+                      <div>
+                        <div className="mb-3 text-sm text-cyan-200/80 flex items-center justify-between">
+                          <span>Live Adventure (Preview): location-aware panel</span>
+                          <button onClick={() => navigate('/live')} className="text-cyan-300 hover:underline">Open full page →</button>
+                        </div>
+                        <LocationAwarePanel />
+                      </div>
+                    )}
                   </div>
                 )}
               </motion.div>

@@ -13,6 +13,9 @@ import destinationsRouter from './routes/destinations.js';
 import whoamiRouter from './routes/whoami.js';
 import feedbackRouter from './routes/feedback.js';
 import profileRouter from './routes/profile.js';
+import liveFoodRouter from './routes/liveFood.js';
+import liveRerouteRouter from './routes/liveReroute.js';
+import liveTipsRouter from './routes/liveTips.js';
 
 export function buildApp() {
   const app = express();
@@ -46,6 +49,9 @@ export function buildApp() {
   app.use('/api/feedback', authMiddleware, feedbackRouter);
   app.use('/api/journeys', authMiddleware, journeysRouter);
   app.use('/api/profile', authMiddleware, profileRouter);
+  app.use('/api/live/food', authMiddleware, liveFoodRouter);
+  app.use('/api/live/reroute', authMiddleware, liveRerouteRouter);
+  app.use('/api/live/tips', authMiddleware, liveTipsRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;
