@@ -1093,7 +1093,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         const ctrl = new AbortController();
         dynSuggestAbortRef.current = ctrl;
         const token = await getFirebaseIdToken();
-        const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(lastSegment)}`, {
+        const baseUrl = getApiBase();
+        const res = await fetch(`${baseUrl}/api/destinations/suggest?q=${encodeURIComponent(lastSegment)}`, {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           signal: ctrl.signal,
         });
@@ -1108,7 +1109,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       }
     }, 180);
     return () => clearTimeout(handler);
-  }, [dynText, currentQuestionType, base]);
+  }, [dynText, currentQuestionType]);
 
   // Helper: auto-capitalize first letter of each word for destinations
   const capitalizeWords = (s) => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b);
@@ -1866,7 +1867,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         const ctrl = new AbortController();
         inputSuggestAbortRef.current = ctrl;
         const token = await getFirebaseIdToken();
-        const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(last)}`, {
+        const baseUrl = getApiBase();
+        const res = await fetch(`${baseUrl}/api/destinations/suggest?q=${encodeURIComponent(last)}`, {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           signal: ctrl.signal,
         });
@@ -1881,7 +1883,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       }
     }, 180);
     return () => clearTimeout(t);
-  }, [input, stage, inputSpec?.type, base]);
+  }, [input, stage, inputSpec?.type]);
 
   const capFirstWord = (s) => s.replace(/^\s*([a-z])/, (m, a) => a.toUpperCase());
 
