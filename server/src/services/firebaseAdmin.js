@@ -63,6 +63,63 @@ export async function getTravelProfile(uid) {
   }
 }
 
+// Firestore helpers for persistence
+export function getFirestore() {
+  const adm = ensureFirebaseAdmin();
+  return adm ? adm.firestore() : null;
+}
+
+export async function logChatExchange(uid, data) {
+  try {
+    if (!uid) return false;
+    const db = getFirestore();
+    if (!db) return false;
+    const sessionId = data?.sessionId || new Date().toISOString().slice(0,10).replace(/-/g, ''); // YYYYMMDD
+    const exchanges = db
+      .collection('users').doc(uid)
+      .collection('chatSessions').doc(sessionId)
+      .collection('exchanges');
+    const payload = {
+      userMessage: String(data?.userMessage || ''),
+      assistantMessage: String(data?.assistantMessage || ''),
+      tripState: data?.tripState || {},
+      nextQuestionType: data?.nextQuestionType || null,
+      nextQuestionPrompt: data?.nextQuestionPrompt || null,
+      meta: data?.meta || {},
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await exchanges.add(payload);
+    return true;
+  } catch (e) {
+    console.warn('[Firestore] logChatExchange failed:', e?.message || e);
+    return false;
+  }
+}
+
+export async function saveItinerary(uid, itineraryData) {
+  try {
+    if (!uid) return false;
+    const db = getFirestore();
+    if (!db) return false;
+    const col = db.collection('users').doc(uid).collection('itineraries');
+    const doc = {
+      tripState: itineraryData?.tripState || {},
+      travelProfile: itineraryData?.travelProfile || {},
+      markdown: String(itineraryData?.markdown || ''),
+      title: itineraryData?.title || null,
+      durationDays: itineraryData?.durationDays || null,
+      locations: itineraryData?.locations || null,
+      source: itineraryData?.source || 'api',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await col.add(doc);
+    return true;
+  } catch (e) {
+    console.warn('[Firestore] saveItinerary failed:', e?.message || e);
+    return false;
+  }
+}
+
 
 
 

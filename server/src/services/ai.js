@@ -1,6 +1,6 @@
 // server/src/services/ai.js
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 // --- Configuration & Lazy Initialization ---
 let _genAI = null;
@@ -8,32 +8,61 @@ let _cachedKey = null;
 const ITINERARY_USE_AI = String(process.env.ITINERARY_USE_AI || 'true').toLowerCase() === 'true';
 // Simple in-memory cache for itineraries (keyed by stable trip signature)
 const _itineraryCache = new Map();
-function getModel(modelName) {
+function ensureClient() {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    throw new Error('Gemini API key not configured.');
-  }
+  if (!key) throw new Error('Gemini API key not configured.');
   if (!_genAI || _cachedKey !== key) {
-    _genAI = new GoogleGenerativeAI(key);
+    _genAI = new GoogleGenAI({ apiKey: key }); // new unified SDK (v1)
     _cachedKey = key;
     console.log('[Gemini] Client (re)initialized.');
   }
-  const name = modelName || process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest';
-  return _genAI.getGenerativeModel({ model: name });
+  return _genAI;
 }
 
-function getModelCandidates() {
-  const requested = (process.env.GEMINI_MODEL || '').trim() || 'gemini-1.5-flash-latest';
-  const cands = [requested];
-  // Add sensible fallbacks if the requested one is not found on this API version/region
-  if (!/\blatest\b/.test(requested)) cands.push(`${requested}-latest`);
-  // Prefer flash variants, then pro
-  if (!cands.includes('gemini-1.5-flash-latest')) cands.push('gemini-1.5-flash-latest');
-  if (!cands.includes('gemini-1.5-flash')) cands.push('gemini-1.5-flash');
-  if (!cands.includes('gemini-1.5-pro-latest')) cands.push('gemini-1.5-pro-latest');
-  if (!cands.includes('gemini-1.5-pro')) cands.push('gemini-1.5-pro');
+async function generateWithModel(name, promptText) {
+  const client = ensureClient();
+  const model = name || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const req = {
+    model,
+    contents: [{ role: 'user', parts: [{ text: String(promptText || '') }]}],
+  };
+  const resp = await client.models.generateContent(req);
+  // Normalize into the shape used by legacy code: result.response.text()
+  const text = (resp?.candidates?.[0]?.content?.parts || [])
+    .map(p => (typeof p.text === 'string' ? p.text : ''))
+    .join('');
+  return { response: { text: () => text } };
+}
+
+export function getModelCandidates() {
+  const requested = (process.env.GEMINI_MODEL || '').trim();
+  const preferred = [
+    // Prefer current models known to work on v1beta
+    'gemini-2.5-flash',
+    'gemini-2.0-pro',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+  ];
+  const legacy = [
+    'gemini-1.5-flash-002',
+    'gemini-1.5-pro-002',
+    'gemini-1.5-flash-8b',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro-latest',
+    'gemini-1.5-pro',
+    'gemini-1.0-pro-latest',
+    'gemini-1.0-pro',
+    'gemini-pro',
+  ];
+  const cands = [
+    // If an explicit model is set, try it first along with common variants
+    ...(requested ? [requested, `${requested}-latest`, `${requested}-002`] : []),
+    ...preferred,
+    ...legacy,
+  ];
   // De-duplicate while preserving order
-  return Array.from(new Set(cands));
+  return Array.from(new Set(cands.filter(Boolean)));
 }
 
 // --- Helpers to condense context for Gemini ---
@@ -227,9 +256,8 @@ export async function callGemini({ prompt, tripState, chatHistory, userProfileDN
     let lastErr;
     for (const name of models) {
       try {
-        const model = getModel(name);
         console.log(`[Gemini] Using model: ${name}`);
-        const result = await model.generateContent(content);
+        const result = await generateWithModel(name, content);
         return result;
       } catch (err) {
         const msg = String(err?.message || err || 'error');
@@ -494,11 +522,26 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
     const locs = trip.locations && trip.locations.length ? trip.locations : [];
     let anchorOk = true;
     if (locs.length) {
-      // Require at least one of the provided destinations to appear
-      const anyPresent = locs.some(l => lower.includes(l.toLowerCase()));
+      // Build keyword tokens from provided locations; handle comma/pipe/semicolon and word splits.
+      const tokens = Array.from(new Set(
+        locs
+          .flatMap(raw => String(raw || '')
+            .toLowerCase()
+            .split(/[\,\|;\/]+/)
+            .flatMap(part => {
+              const p = part.trim();
+              if (!p) return [];
+              const words = p.split(/[^a-zA-Z]+/).map(w => w.trim()).filter(w => w.length >= 3);
+              // Include the whole part and its words
+              return [p, ...words];
+            })
+          )
+          .filter(Boolean)
+      ));
+      const anyPresent = tokens.some(t => lower.includes(t));
       if (!anyPresent) anchorOk = false;
     } else if (trip.region) {
-      if (!lower.includes(trip.region.toLowerCase())) anchorOk = false;
+      if (!lower.includes(String(trip.region).toLowerCase())) anchorOk = false;
     }
 
     if (!anchorOk) {

@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { mustBeAuthed } from '../middleware/auth.js';
 import { callGemini } from '../services/ai.js';
-import { getTravelProfile } from '../services/firebaseAdmin.js';
+import { getTravelProfile, logChatExchange } from '../services/firebaseAdmin.js';
 
 const router = Router();
 router.use(mustBeAuthed);
@@ -37,10 +37,17 @@ router.post('/', async (req, res) => {
     if (msg) {
       switch (lastQuestionType) {
         case 'destination': {
-          tripState.destination = msg;
-          if (!tripState.locations) {
-            const parts = msg.split(',').map(s => s.trim()).filter(Boolean);
-            if (parts.length) tripState.locations = parts;
+          // Normalize and auto-capitalize each word of destinations
+          const parts = msg
+            .split(/[\n,]+/)
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(s => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b));
+          if (parts.length) {
+            tripState.destination = parts.join(', ');
+            tripState.locations = parts;
+          } else {
+            tripState.destination = msg;
           }
           break;
         }
@@ -105,6 +112,23 @@ router.post('/', async (req, res) => {
           }
           break;
         }
+        case 'freeText': {
+          // If this freeText likely contains destinations (comma-separated), capture them as locations too
+          const looksLikeDest = /[,\n]/.test(msg) || /city|town|village|place|destination/i.test(msg);
+          if (looksLikeDest) {
+            const locs = msg
+              .split(/[\n,]+/)
+              .map(s => s.trim())
+              .filter(Boolean)
+              .map(s => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b));
+            if (locs.length) {
+              tripState.locations = locs;
+              tripState.destination = locs.join(', ');
+            }
+          }
+          tripState.notes = msg;
+          break;
+        }
         case 'travelers': {
           const n = parseInt(msg, 10);
           if (!Number.isNaN(n)) tripState.travelers = n;
@@ -151,7 +175,7 @@ router.post('/', async (req, res) => {
     }
 
     // If the last step was choosing a transport mode, immediately ask for mode-specific details without calling AI again
-    if (lastQuestionType === 'multiChoice' && /transport|mode\s+of\s+transport|getting\s+there|how\s+(do|will)\s+you\s+(get|go)/i.test(String(lastQuestionPrompt || ''))) {
+  if (lastQuestionType === 'multiChoice' && /transport|mode\s+of\s+transport|getting\s+there|how\s+(do|will)\s+you\s+(get|go)/i.test(String(lastQuestionPrompt || ''))) {
       const mode = tripState.transportationMode || 'Other';
       let detailsPrompt = '';
       switch (String(mode).toLowerCase()) {
@@ -176,13 +200,16 @@ router.post('/', async (req, res) => {
         default:
           detailsPrompt = 'Travel details (optional): briefly describe your plan to get there. Or type "skip".';
       }
-      return res.json({
+      const payload = {
         assistantMessage: `Got it — ${mode}. ${detailsPrompt}`,
         newTripState: tripState,
         nextQuestionType: 'transportDetails',
         nextQuestionPrompt: detailsPrompt,
         nextQuestionCurrentValue: null
-      });
+      };
+      // Persist exchange
+      logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+      return res.json(payload);
     }
 
     // Helper: check if essential fields are present
@@ -193,7 +220,7 @@ router.post('/', async (req, res) => {
     // NEW: Always ask upfront whether to plan from doorstep or start at destination
     // If not answered yet, insert this step before any other logic and skip AI call
     if (typeof tripState.doorstep === 'undefined') {
-      return res.json({
+      const payload = {
         assistantMessage: 'Should I plan your itinerary from your doorstep (including travel to the destination), or start at the destination itself?',
         newTripState: tripState,
         nextQuestionType: 'doorstepChoice',
@@ -202,7 +229,9 @@ router.post('/', async (req, res) => {
         nextQuestionOptions: ['Start from my doorstep', 'Start at the destination'],
         // Provide an explicit input spec for the frontend StageInput to render buttons
         input: { type: 'options', options: ['Start from my doorstep', 'Start at the destination'] },
-      });
+      };
+      logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+      return res.json(payload);
     }
 
     // Fast path: if the user is clearly asking to finalize, skip to generate
@@ -210,13 +239,15 @@ router.post('/', async (req, res) => {
     const userWantsDone = /generate|final(ize|ise)|ready|done|create|build\s+itiner|give\s+the\s+final|itinerary|itenary/i.test(msg);
     if (userWantsDone && hasEssentials) {
       const summary = `${(tripState.locations && tripState.locations.join(', ')) || tripState.destination || tripState.region}, ${(tripState.durationDays || '')} days, ${tripState.travelers} traveler${Number(tripState.travelers) > 1 ? 's' : ''}${tripState.startDate && tripState.endDate ? ` (${tripState.startDate} → ${tripState.endDate})` : ''}`.trim();
-      return res.json({
+      const payload = {
         assistantMessage: `All set — ${summary}. Ready to generate your itinerary now?`,
         newTripState: tripState,
         nextQuestionType: 'generate',
         nextQuestionPrompt: 'Generate your itinerary:',
         nextQuestionCurrentValue: null
-      });
+      };
+      logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+      return res.json(payload);
     }
 
     // If essentials are present, minimize further questioning: confirm then generate
@@ -227,41 +258,49 @@ router.post('/', async (req, res) => {
 
       if (lastQuestionType === 'confirm') {
         if (positive || userWantsDone) {
-          return res.json({
+          const payload = {
             assistantMessage: `Perfect — generating your itinerary now.`,
             newTripState: tripState,
             nextQuestionType: 'generate',
             nextQuestionPrompt: 'Generate your itinerary:',
             nextQuestionCurrentValue: null
-          });
+          };
+          logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+          return res.json(payload);
         }
         if (negative) {
-          return res.json({
+          const payload = {
             assistantMessage: `No problem — what would you like to change (destination, dates, days, travelers)?`,
             newTripState: tripState,
             nextQuestionType: 'freeText',
             nextQuestionPrompt: 'What should we update?',
             nextQuestionCurrentValue: null
-          });
+          };
+          logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+          return res.json(payload);
         }
         // If user replied with something else, still keep confirm on screen rather than ask granular
-        return res.json({
+        const payload = {
           assistantMessage: `Just to confirm: ${summary}. Shall I generate your itinerary?`,
           newTripState: tripState,
           nextQuestionType: 'confirm',
           nextQuestionPrompt: 'Confirm Trip Details:',
           nextQuestionCurrentValue: summary
-        });
+        };
+        logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+        return res.json(payload);
       }
 
       // If we haven't asked for confirmation yet, do it now and skip the AI call
-      return res.json({
+      const payload = {
         assistantMessage: `Okay — ${summary}. Shall I generate your itinerary?`,
         newTripState: tripState,
         nextQuestionType: 'confirm',
         nextQuestionPrompt: 'Confirm Trip Details:',
         nextQuestionCurrentValue: summary
-      });
+      };
+      logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+      return res.json(payload);
     }
 
     // 3) Prepare a copy for AI without internal helper fields
@@ -285,13 +324,15 @@ router.post('/', async (req, res) => {
         if (!(tripState.durationDays || (tripState.startDate && tripState.endDate))) missing.push('duration/dates');
         if (!tripState.travelers) missing.push('travelers');
         const msgHint = missing.length ? `Let's continue. Please provide ${missing[0]}.` : 'Let’s continue to confirmation.';
-        return res.json({
+        const payload = {
           assistantMessage: `I hit a snag processing that. ${msgHint}`,
           newTripState: tripState,
           nextQuestionType: missing[0] === 'duration/dates' ? 'duration' : (missing[0] === 'travelers' ? 'travelers' : (missing[0] ? 'destination' : 'confirm')),
           nextQuestionPrompt: missing[0] === 'duration/dates' ? 'How many days will your trip be?' : (missing[0] === 'travelers' ? 'How many travelers?' : (missing[0] ? 'Where are you headed?' : 'Confirm trip details:')),
           nextQuestionCurrentValue: null
-        });
+        };
+        logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+        return res.json(payload);
       }
     } else {
       // Determine next step deterministically without AI to save quota
@@ -360,7 +401,8 @@ router.post('/', async (req, res) => {
       } else if (next.type === 'dates') {
         payload.input = { type: 'dates' };
       }
-      return res.json(payload);
+  logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+  return res.json(payload);
     }
 
     // 5) Prepare response payload for frontend orchestration
@@ -381,7 +423,7 @@ router.post('/', async (req, res) => {
     if (transportAsk.test(nextPrompt) || transportAsk.test(aiResponse?.assistantReply || '')) {
       const options = ['Flight', 'Train', 'Bus', 'Car', 'Rideshare/Taxi', 'Ferry', 'Other'];
       const prompt = 'How would you like to travel?';
-      return res.json({
+      const payload = {
         assistantMessage: aiResponse?.assistantReply ? `${aiResponse.assistantReply}\n\nChoose a mode:` : 'How would you like to travel?',
         newTripState: tripState,
         nextQuestionType: 'multiChoice',
@@ -389,7 +431,9 @@ router.post('/', async (req, res) => {
         nextQuestionCurrentValue: null,
         nextQuestionOptions: options,
         input: { type: 'options', options }
-      });
+      };
+      logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
+      return res.json(payload);
     }
 
     // Derive helpful hints for the next step, if applicable
@@ -428,7 +472,7 @@ router.post('/', async (req, res) => {
       nextQuestionOptions: Array.isArray(aiResponse?.nextQuestion?.options) ? aiResponse.nextQuestion.options : undefined,
       nextQuestionHints: Object.keys(nextHints || {}).length ? nextHints : undefined,
     };
-
+    logChatExchange(uid, { userMessage: msg, assistantMessage: payload.assistantMessage, tripState, nextQuestionType: payload.nextQuestionType, nextQuestionPrompt: payload.nextQuestionPrompt });
     return res.json(payload);
   } catch (err) {
     console.error('[/api/chat] Error:', err);

@@ -16,6 +16,7 @@ import profileRouter from './routes/profile.js';
 import liveFoodRouter from './routes/liveFood.js';
 import liveRerouteRouter from './routes/liveReroute.js';
 import liveTipsRouter from './routes/liveTips.js';
+import diagnosticsRouter from './routes/diagnostics.js';
 
 export function buildApp() {
   const app = express();
@@ -41,6 +42,10 @@ export function buildApp() {
   app.use('/api/', apiLimiter);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
+  // Public health under /api/* for Hosting rewrites
+  app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/ping', (_req, res) => res.json({ pong: true, time: new Date().toISOString() }));
+  app.use('/api/diagnostics', diagnosticsRouter);
 
   app.use('/api/chat', authMiddleware, chatRouter);
   app.use('/api/suggest', authMiddleware, suggestRouter);

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { ensureFirebaseAdmin } from '../services/firebaseAdmin.js';
+import { generateChatTitle } from '../services/ai.js';
 
 const router = Router();
 

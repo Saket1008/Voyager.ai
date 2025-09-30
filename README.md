@@ -8,7 +8,7 @@ This README is a complete handoff for local dev, configuration, and deployment. 
 
 - Frontend: React 18 + Vite + Tailwind + Framer Motion
 - Backend: Node 18+ + Express (can run standalone or behind Firebase Functions)
-- AI: Google Gemini via @google/generative-ai
+- AI: Google Gemini via @google/genai (new SDK)
 - Auth: Firebase Authentication (client) + Firebase Admin (server)
 - Data: Firestore (user profiles, onboarding/dna)
 
@@ -175,17 +175,17 @@ Most endpoints are auth-protected and require a Firebase ID token in the Authori
 
 ## AI Integration Details
 
-- SDK: @google/generative-ai
+- SDK: @google/genai
 - Model selection is resilient:
-	- If GEMINI_MODEL is provided, it’s tried first; otherwise defaults to gemini-1.5-flash-latest.
-	- Automatic fallbacks: [requested, requested-latest, gemini-1.5-flash-latest, gemini-1.5-flash, gemini-1.5-pro-latest, gemini-1.5-pro].
-	- 404/unsupported errors trigger a retry with the next candidate; other errors (quota/network) don’t spin endlessly.
+	- If GEMINI_MODEL is provided, it’s tried first.
+	- Automatic fallbacks prefer current models: [requested, requested-latest, requested-002, gemini-2.5-flash, gemini-2.0-pro, gemini-2.0-flash, gemini-2.0-flash-lite, 1.5 variants].
+	- 404/unsupported errors trigger retry with the next candidate; other errors (quota/network) stop retries.
 - Caching: Itineraries are cached in-memory per normalized trip signature to reduce duplicate calls.
 
-Quick health-check of your key (optional test script):
+Quick health-check of your key (optional test):
 
 ```powershell
-node .\server\scripts\test_gemini_connection.mjs
+curl http://localhost:5000/api/diagnostics
 ```
 
 This script checks the API key and model (reads server/.env, not .env.local). If needed, copy your variables to server/.env for the test.

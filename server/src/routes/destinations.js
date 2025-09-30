@@ -13,7 +13,13 @@ const CITIES = [
   'Perth', 'Philadelphia', 'Phoenix', 'Prague', 'Quebec City', 'Reykjavik', 'Rio de Janeiro', 'Rome', 'San Diego', 'San Francisco',
   'Santiago', 'São Paulo', 'Seattle', 'Seoul', 'Seville', 'Shanghai', 'Singapore', 'Stockholm', 'Sydney', 'Taipei',
   'Tallinn', 'Tel Aviv', 'Tokyo', 'Toronto', 'Valencia', 'Vancouver', 'Venice', 'Vienna', 'Warsaw', 'Washington, D.C.',
-  'Zurich'
+  'Zurich',
+  // India and regional, including "Pal*" for requested examples
+  'Palitana', 'Pali', 'Palampur', 'Palakkad', 'Palghar', 'Palanpur', 'Palanpur Junction', 'Palolem',
+  'Patan', 'Porbandar', 'Pune', 'Panaji', 'Pondicherry', 'Patna', 'Prayagraj', 'Puri', 'Pushkar', 'Pahalgam',
+  'Gandhinagar', 'Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Junagadh', 'Girnar', 'Somnath', 'Dwarka',
+  'Udaipur', 'Jaipur', 'Jodhpur', 'Jaisalmer', 'Mount Abu', 'Rishikesh', 'Haridwar', 'Manali', 'Shimla', 'Leh',
+  'Goa', 'Kochi', 'Thiruvananthapuram', 'Mysuru', 'Bengaluru', 'Hyderabad', 'Chandigarh', 'Amritsar', 'Varanasi'
 ];
 
 router.get('/suggest', (req, res) => {
