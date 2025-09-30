@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { mustBeAuthed } from '../middleware/auth.js';
 import { generateItineraryMarkdown } from '../services/ai.js';
-import { getTravelProfile } from '../services/firebaseAdmin.js';
+import { getTravelProfile, saveItinerary } from '../services/firebaseAdmin.js';
 
 const router = Router();
 router.use(mustBeAuthed);
@@ -34,6 +34,18 @@ router.post('/', async (req, res) => {
     }
     console.log('[ITINERARY_LOG] Calling generateItineraryMarkdown...');
     const markdown = await generateItineraryMarkdown({ user, travelProfile, tripState });
+
+    // Persist itinerary doc (best-effort; do not block response)
+    const locs = Array.isArray(tripState?.locations) ? tripState.locations : (tripState?.locations ? [tripState.locations] : []);
+    saveItinerary(user.uid, {
+      tripState,
+      travelProfile,
+      markdown,
+      title: `${(locs && locs.join(' · ')) || tripState?.region || 'Trip'} • ${tripState?.durationDays || ''}d`,
+      durationDays: tripState?.durationDays || null,
+      locations: locs.length ? locs : null,
+      source: 'api',
+    }).catch(() => {});
 
     console.log('[ITINERARY_LOG] Successfully generated itinerary markdown.');
     res.type('text/markdown').send(markdown);

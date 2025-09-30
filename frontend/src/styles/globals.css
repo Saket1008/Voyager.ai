@@ -10,6 +10,16 @@ body, html, #root {
 	color: #e5e7eb; /* Tailwind gray-200 */
 }
 
+/* Subtle float animation for hero graphics */
+.animate-float {
+	animation: floatY 4.2s ease-in-out infinite;
+}
+
+@keyframes floatY {
+	0%, 100% { transform: translateY(0px) }
+	50% { transform: translateY(-6px) }
+}
+
 /* Custom scrollbar for a cleaner look */
 ::-webkit-scrollbar {
 	width: 8px;

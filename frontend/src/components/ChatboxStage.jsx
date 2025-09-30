@@ -32,6 +32,38 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
   // Inline custom input support for options lists ("Other…")
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherText, setOtherText] = useState('');
+  // Typeahead for input_locations free text field
+  const [locText, setLocText] = useState('');
+  const [locSug, setLocSug] = useState([]);
+  const [locOpen, setLocOpen] = useState(false);
+  const abortRef = useRef(null);
+  const capitalizeWords = (s) => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b);
+  useEffect(() => {
+    if (stage !== 'input_locations' || inputSpec?.type !== 'freeText') { setLocSug([]); setLocOpen(false); return; }
+    const last = (locText.split(/[\n,]+/).pop() || '').trim();
+    if (last.length < 2) { setLocSug([]); setLocOpen(false); return; }
+    const t = setTimeout(async () => {
+      try {
+        abortRef.current?.abort();
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
+        const token = await getFirebaseIdToken();
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(last)}`, {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error('sugg fail');
+        const arr = await res.json();
+        setLocSug(Array.isArray(arr) ? arr : []);
+        setLocOpen(true);
+      } catch (e) {
+        if (e?.name !== 'AbortError') console.warn('loc typeahead', e?.message);
+        setLocSug([]); setLocOpen(false);
+      }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [locText, stage, inputSpec?.type]);
 
   // Debug logging
   useEffect(() => {
@@ -202,10 +234,11 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
         const region = String(value || '').trim();
         if (region) setFlowState(prev => ({ ...prev, region }));
       } else if (stage === 'input_locations') {
-        const locations = String(value || '')
-          .split(/,|\n/)
-          .map(s => s.trim())
-          .filter(Boolean);
+          const locations = String(value || '')
+            .split(/,|\n/)
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(s => capitalizeWords(s));
         if (locations.length) setFlowState(prev => ({ ...prev, locations }));
       }
       await onSubmit(value);
@@ -1007,6 +1040,9 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [activeId, setActiveId] = useState('default');
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId), [chats, activeId]);
   const [input, setInput] = useState('');
+  const [inputSuggestions, setInputSuggestions] = useState([]);
+  const [inputSuggestOpen, setInputSuggestOpen] = useState(false);
+  const inputSuggestAbortRef = useRef(null);
   const [isTyping, setIsTyping] = useState(false);
   // Dynamic flow: next question from backend
   const [currentQuestionType, setCurrentQuestionType] = useState(null);
@@ -1015,6 +1051,9 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [currentQuestionOptions, setCurrentQuestionOptions] = useState([]);
   // Simple local states for dynamic widgets
   const [dynText, setDynText] = useState('');
+  const [dynSuggestions, setDynSuggestions] = useState([]);
+  const [dynSuggestOpen, setDynSuggestOpen] = useState(false);
+  const dynSuggestAbortRef = useRef(null);
   const [dynDays, setDynDays] = useState(5);
   const [dynStartDate, setDynStartDate] = useState('');
   const [dynEndDate, setDynEndDate] = useState('');
@@ -1041,6 +1080,38 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       if (!Number.isNaN(n) && n > 0) setDynTravelers(n);
     }
   }, [currentQuestionType, currentQuestionCurrentValue]);
+
+  // Debounced typeahead for destination input
+  useEffect(() => {
+    const v = String(dynText || '');
+    const lastSegment = v.split(/[\n,]+/).pop()?.trim() || '';
+    const shouldSuggest = currentQuestionType === 'destination' && lastSegment.length >= 2;
+    if (!shouldSuggest) { setDynSuggestions([]); setDynSuggestOpen(false); return; }
+    const handler = setTimeout(async () => {
+      try {
+        if (dynSuggestAbortRef.current) { dynSuggestAbortRef.current.abort(); }
+        const ctrl = new AbortController();
+        dynSuggestAbortRef.current = ctrl;
+        const token = await getFirebaseIdToken();
+        const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(lastSegment)}`, {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`Suggest failed ${res.status}`);
+        const arr = await res.json();
+        setDynSuggestions(Array.isArray(arr) ? arr : []);
+        setDynSuggestOpen(true);
+      } catch (e) {
+        if (e?.name !== 'AbortError') console.warn('typeahead error', e?.message);
+        setDynSuggestions([]);
+        setDynSuggestOpen(false);
+      }
+    }, 180);
+    return () => clearTimeout(handler);
+  }, [dynText, currentQuestionType, base]);
+
+  // Helper: auto-capitalize first letter of each word for destinations
+  const capitalizeWords = (s) => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b);
   // Frontend is a dumb renderer; backend provides stage/inputSpec/quickOptions
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
@@ -1784,6 +1855,36 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     }
   }, [search]);
 
+  // Debounced typeahead for bottom composer when entering destinations
+  useEffect(() => {
+    const isDestStage = stage === 'input_locations' && inputSpec?.type === 'freeText';
+    const last = (String(input || '').split(/[\n,]+/).pop() || '').trim();
+    if (!isDestStage || last.length < 2) { setInputSuggestions([]); setInputSuggestOpen(false); return; }
+    const t = setTimeout(async () => {
+      try {
+        inputSuggestAbortRef.current?.abort();
+        const ctrl = new AbortController();
+        inputSuggestAbortRef.current = ctrl;
+        const token = await getFirebaseIdToken();
+        const res = await fetch(`${base}/api/destinations/suggest?q=${encodeURIComponent(last)}`, {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`suggest ${res.status}`);
+        const arr = await res.json();
+        setInputSuggestions(Array.isArray(arr) ? arr : []);
+        setInputSuggestOpen(true);
+      } catch (e) {
+        if (e?.name !== 'AbortError') console.warn('composer typeahead', e?.message);
+        setInputSuggestions([]);
+        setInputSuggestOpen(false);
+      }
+    }, 180);
+    return () => clearTimeout(t);
+  }, [input, stage, inputSpec?.type, base]);
+
+  const capFirstWord = (s) => s.replace(/^\s*([a-z])/, (m, a) => a.toUpperCase());
+
   // Keyboard shortcut: Ctrl/Cmd+K to focus search
   useEffect(() => {
     const onKey = (e) => {
@@ -2180,10 +2281,19 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
                       {/* destination/freeText */}
                       {(currentQuestionType === 'destination' || currentQuestionType === 'freeText' || currentQuestionType === 'budget') && (
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-start gap-3 relative">
                           <TextareaAutosize
                             value={dynText}
-                            onChange={(e) => setDynText(e.target.value)}
+                            onChange={(e) => {
+                              let val = e.target.value;
+                              if (currentQuestionType === 'destination') {
+                                val = val
+                                  .split(/([\n,]+)/)
+                                  .map(seg => /[\n,]+/.test(seg) ? seg : capitalizeWords(seg))
+                                  .join('');
+                              }
+                              setDynText(val);
+                            }}
                             minRows={1}
                             maxRows={6}
                             placeholder={currentQuestionPrompt || 'Type your answer...'}
@@ -2192,13 +2302,35 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
-                                const v = dynText.trim();
+                                const v = (currentQuestionType === 'destination' ? dynText.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).join(', ') : dynText).trim();
                                 if (v) { sendMessage(v); setDynText(''); }
                               }
                             }}
                           />
+                          {/* Typeahead dropdown */}
+                          {currentQuestionType === 'destination' && dynSuggestOpen && dynSuggestions.length > 0 && (
+                            <div className="absolute left-0 right-14 top-full mt-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-20">
+                              {dynSuggestions.map((opt, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    const parts = dynText.split(/[\n,]+/);
+                                    parts[parts.length - 1] = ` ${opt}`;
+                                    const out = parts.filter(Boolean).join(', ').replace(/\s+,/g, ',');
+                                    setDynText(out.trim());
+                                    setDynSuggestOpen(false);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-sm text-white/90 hover:bg-white/10"
+                                >{opt}</button>
+                              ))}
+                            </div>
+                          )}
                           <button
-                            onClick={() => { setDynText(t => t.trim()); if (dynText.trim()) { sendMessage(dynText.trim()); setDynText(''); } }}
+                            onClick={() => {
+                              const v = (currentQuestionType === 'destination' ? dynText.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).join(', ') : dynText).trim();
+                              if (v) { sendMessage(v); setDynText(''); }
+                            }}
                             disabled={isTyping || !dynText.trim()}
                             className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                           >
@@ -2434,14 +2566,25 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         </button>
                       </div>
                     ) : null}
-                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-center gap-3" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
+                    <div className="rounded-full bg-white/5 backdrop-blur-md p-3 flex items-start gap-3 relative" style={{ boxShadow: '0 0 30px rgba(255,255,255,0.02)' }}>
                       <TextareaAutosize 
                         value={input} 
-                        onChange={(e) => setInput(e.target.value)} 
+                        onChange={(e) => {
+                          let val = e.target.value;
+                          if (stage === 'input_locations' && inputSpec?.type === 'freeText') {
+                            // Auto-capitalize first word of each destination segment
+                            val = val
+                              .split(/([\n,]+)/)
+                              .map(seg => /[\n,]+/.test(seg) ? seg : capFirstWord(seg))
+                              .join('');
+                          }
+                          setInput(val);
+                        }} 
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
-                            sendMessage(input);
+                            const msg = (stage === 'input_locations' ? input.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).join(', ') : input);
+                            sendMessage(msg);
                           }
                         }} 
                         minRows={1} 
@@ -2450,8 +2593,29 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         className="w-full resize-none bg-transparent py-3 pl-4 pr-24 text-gray-200 placeholder-gray-400 outline-none text-sm" 
                         disabled={isTyping}
                       />
+                      {stage === 'input_locations' && inputSuggestOpen && inputSuggestions.length > 0 && (
+                        <div className="absolute left-4 right-24 top-full mt-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-20">
+                          {inputSuggestions.map((opt, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                const parts = input.split(/[\n,]+/);
+                                parts[parts.length - 1] = ` ${opt}`;
+                                const out = parts.filter(Boolean).join(', ').replace(/\s+,/g, ',');
+                                setInput(out.trim());
+                                setInputSuggestOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm text-white/90 hover:bg-white/10"
+                            >{opt}</button>
+                          ))}
+                        </div>
+                      )}
                       <button 
-                        onClick={() => sendMessage(input)} 
+                        onClick={() => {
+                          const msg = (stage === 'input_locations' ? input.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).join(', ') : input);
+                          sendMessage(msg);
+                        }} 
                         disabled={isTyping || !input.trim()} 
                         className="ml-auto rounded-full bg-[#19c37d] px-4 py-2 text-black font-semibold hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                       >

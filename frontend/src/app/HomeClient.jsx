@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import OneClickItinerary from '../components/OneClickItinerary.jsx'
 import { motion } from 'framer-motion'
 import SpaceBackground from '../components/SpaceBackground.jsx'
 import { useDevSettings } from '../context/DevSettingsContext.jsx'
@@ -10,6 +12,7 @@ import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
 
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
+  const navigate = useNavigate();
   const { settings } = useDevSettings();
   const showBg = settings.devMode ? settings.showSpaceBg !== false : true;
   const showSplash = settings.devMode ? settings.showSplashLoader !== false : true;
@@ -21,6 +24,7 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const [showButton, setShowButton] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const [showWormhole, setShowWormhole] = useState(false)
+  const [showOneClick, setShowOneClick] = useState(false)
   const titleRef = useRef(null)
   const buttonRef = useRef(null)
   // When an itinerary is generated we store a normalized shape: { markdown: string, plannedDays?: number|null }
@@ -88,11 +92,39 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
         <div className="fixed inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
           <div className="text-center mb-12">
             <h1 ref={titleRef} className={`text-white font-light tracking-widest transition-all duration-150 ${isAnimating ? 'opacity-0' : showTitle ? 'opacity-100' : 'opacity-0'}`} style={{ fontSize: '5vw', fontWeight: 200, letterSpacing: '0.5rem', textShadow: '0 0 15px rgba(173, 216, 230, 0.7)' }}>VOYAGER.AI</h1>
-            <div className="mt-8 flex justify-center">
+            <div className="mt-8 flex justify-center gap-4">
               <button ref={buttonRef} onClick={handleStartJourney} className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} style={{ backdropFilter: 'blur(10px)' }}>
                 BEGIN YOUR JOURNEY
               </button>
+              <button
+                onClick={() => navigate('/begin')}
+                className={`group relative bg-transparent border-2 border-cyan-300 text-cyan-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+              >
+                EXPLORE FEATURES
+              </button>
+              <button
+                onClick={() => navigate('/live')}
+                className={`group relative bg-transparent border-2 border-purple-300 text-purple-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+                title="Live Adventure Mode (Preview)"
+              >
+                LIVE ADVENTURE (PREVIEW)
+              </button>
+              <button
+                onClick={() => setShowOneClick(v => !v)}
+                className={`group relative bg-transparent border-2 border-green-300 text-green-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+                title="Instant itinerary with your saved DNA"
+              >
+                ONE‑CLICK ITINERARY
+              </button>
             </div>
+            {showOneClick && (
+              <div className="mt-6 pointer-events-auto mx-auto w-full max-w-2xl px-4">
+                <OneClickItinerary />
+              </div>
+            )}
           </div>
         </div>
       )}

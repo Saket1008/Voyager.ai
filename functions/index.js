@@ -1,10 +1,3 @@
-import { onRequest } from 'firebase-functions/v2/https';
-import { buildApp } from '../server/src/app.js';
-
-// Build the Express app once
-const app = buildApp();
-
-export const api = onRequest({
-  region: 'us-central1',
-  cors: [/https?:\/\/[^/]+\.(web\.app|firebaseapp\.com)$/, /https?:\/\/localhost(:\d+)?$/]
-}, app);
+// Deprecated: This folder is unused. Functions source is set to "server" in firebase.json.
+// Keeping this stub to avoid confusion; do not deploy from here.
+export const api = undefined;
