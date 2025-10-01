@@ -17,6 +17,7 @@ import liveFoodRouter from './routes/liveFood.js';
 import liveRerouteRouter from './routes/liveReroute.js';
 import liveTipsRouter from './routes/liveTips.js';
 import diagnosticsRouter from './routes/diagnostics.js';
+import dreamsRouter from './routes/dreams.js';
 
 export function buildApp() {
   const app = express();
@@ -57,6 +58,7 @@ export function buildApp() {
   app.use('/api/live/food', authMiddleware, liveFoodRouter);
   app.use('/api/live/reroute', authMiddleware, liveRerouteRouter);
   app.use('/api/live/tips', authMiddleware, liveTipsRouter);
+  app.use('/api/dreams', authMiddleware, dreamsRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;

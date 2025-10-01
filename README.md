@@ -243,7 +243,7 @@ The codebase favors clarity and maintainability. PRs that improve DX (types, doc
 
 ---
 
-### Quick Checklist for Aayush
+### Quick Start Checklist
 
 - Node 18+ installed
 - server/.env.local created with GEMINI_API_KEY and CLIENT_ORIGIN

@@ -112,7 +112,7 @@ export default function LiveAdventurePage() {
         let data = null;
         try { data = await res.json(); } catch {}
         if (!res.ok || !data) throw new Error(data?.error || 'Failed to load journeys');
-        // Normalize to expected array
+        // Normalize itineraries from API (markdown-based). Convert to time-sliced items if possible later; for now, store markdown payloads too.
         const list = Array.isArray(data?.journeys) ? data.journeys : (Array.isArray(data) ? data : []);
         const normalized = list.map((j, idx) => ({
           id: j.id || j._id || `j-${idx}`,
@@ -120,34 +120,31 @@ export default function LiveAdventurePage() {
           date: j.date || j.createdAt || j.updatedAt || null,
           favorite: Boolean(j.favorite || j.isFavorite),
           itinerary: Array.isArray(j.itinerary) ? j.itinerary : (Array.isArray(j.plan) ? j.plan : []),
+          markdown: j.markdown || '',
         }));
         if (!normalized.length) throw new Error('Empty');
         setJourneys(normalized);
         setJourneysStatus('ok');
       } catch (e) {
-        // Fallback mock data
-        const mock = [
-          { id: 'j1', title: 'Rome City Break', date: '2025-08-12', favorite: true, itinerary: [
-            { time: '09:00', location: 'Rome — Colosseum', activity: 'Explore the Colosseum' },
-            { time: '11:00', location: 'Rome — Trevi Fountain', activity: 'Toss a coin at Trevi Fountain' },
-            { time: '13:00', location: 'Rome — Trastevere', activity: 'Lunch at a trattoria in Trastevere' },
-            { time: '15:00', location: 'Rome — Pantheon', activity: 'Visit the Pantheon' },
-            { time: '18:00', location: 'Rome — Piazza Navona', activity: 'Evening stroll in Piazza Navona' },
-          ] },
-          { id: 'j2', title: 'Goa Beach Escape', date: '2025-07-01', favorite: false, itinerary: [
-            { time: '09:30', location: 'Goa — Calangute Beach', activity: 'Beach walk and breakfast' },
-            { time: '12:00', location: 'Goa — Baga', activity: 'Watersports session' },
-            { time: '14:00', location: 'Goa — Candolim', activity: 'Seafood lunch' },
-            { time: '17:30', location: 'Goa — Fort Aguada', activity: 'Sunset viewpoint' },
-          ] },
-          { id: 'j3', title: 'Tokyo Food Crawl', date: '2025-05-18', favorite: false, itinerary: [
-            { time: '08:00 AM', location: 'Tokyo — Tsukiji Outer Market', activity: 'Breakfast sushi' },
-            { time: '11:30 AM', location: 'Tokyo — Asakusa', activity: 'Senso-ji temple visit' },
-            { time: '02:00 PM', location: 'Tokyo — Akihabara', activity: 'Electronics and arcades' },
-            { time: '06:00 PM', location: 'Tokyo — Shibuya', activity: 'Street food and crossing' },
-          ] },
-        ];
-        setJourneys(mock);
+        // Fallback: use locally saved itineraries captured when user generated trips
+        try {
+          const raw = localStorage.getItem('voyager_local_journeys');
+          const arr = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(arr) && arr.length) {
+            setJourneys(arr.map(j => ({
+              id: j.id,
+              title: j.title,
+              date: j.date,
+              favorite: Boolean(j.favorite),
+              itinerary: Array.isArray(j.itinerary) ? j.itinerary : [],
+              markdown: j.markdown || '',
+            })));
+            setJourneysStatus('ok');
+            return;
+          }
+        } catch {}
+        // No local journeys present — keep previous behavior as empty state
+        setJourneys([]);
         setJourneysStatus('ok');
       }
     };

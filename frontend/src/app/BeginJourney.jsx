@@ -49,7 +49,7 @@ const PHASES = [
       { icon: Zap, title: 'One‑Click Itinerary', desc: 'Instant trip plans from a single prompt.' },
       { icon: Rocket, title: 'Live Adventure Mode', desc: 'Adaptive schedule that reacts to your day.' },
       { icon: Brain, title: 'Memory Weaver', desc: 'Learns your style across trips automatically.' },
-      { icon: Globe, title: 'Dream Destinations', desc: 'Curated wishlists that evolve with you.' },
+      { icon: Globe, title: '🌍 Dream Destinations', desc: 'Set your dream trip, track your savings, and even plan collaboratively with friends.' },
     ],
   },
   {
@@ -157,7 +157,14 @@ export default function BeginJourney() {
           >
             <Rocket className="h-5 w-5" /> {HERO.cta}
           </button>
-        </motion.div>
+          </motion.div>
+          <button
+            onClick={() => navigate('/dreams')}
+            className="rounded-lg bg-white/10 text-white border border-white/20 px-4 py-2 hover:bg-white/20"
+            title="Plan and collaborate on dream destinations"
+          >
+            🌍 Dream Destinations
+          </button>
       </div>
 
       {/* Phases */}
@@ -185,14 +192,21 @@ export default function BeginJourney() {
               {phase.features.map((f, i) => {
                 const isOneClick = phase.key === 'phase2' && /One\u2011?Click Itinerary|One-Click Itinerary/i.test(f.title)
                 const isLive = phase.key === 'phase2' && /Live Adventure Mode/i.test(f.title)
+                const isDreams = phase.key === 'phase2' && (String(f.title || '').includes('Dream Destinations'))
                 return (
                   <FeatureCard
                     key={`${phase.key}-${i}`}
                     icon={f.icon}
                     title={f.title}
                     desc={f.desc}
-                    onClick={isOneClick ? () => setShowOneClickDemo(v => !v) : (isLive ? () => setShowLiveDemo(v => !v) : undefined)}
-                    interactive={isOneClick || isLive}
+                    onClick={
+                      isOneClick
+                        ? () => setShowOneClickDemo(v => !v)
+                        : isLive
+                          ? () => setShowLiveDemo(v => !v)
+                          : (isDreams ? () => navigate('/dreams') : undefined)
+                    }
+                    interactive={isOneClick || isLive || isDreams}
                   />
                 )
               })}

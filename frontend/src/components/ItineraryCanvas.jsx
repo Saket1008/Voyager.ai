@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sunrise, Sun, Moon, Utensils, Info, Copy, Printer, Star } from 'lucide-react';
+import { X, Sunrise, Sun, Moon, Utensils, Info, Copy, Printer, Star, Heart } from 'lucide-react';
 
 // Parse markdown into days based on headings like "### Day N: Title"
 function parseItinerary(markdown) {
@@ -192,6 +192,34 @@ export default function ItineraryCanvas({ itineraryMarkdown, onClose, isSidebarO
     try { await navigator.clipboard.writeText(itineraryMarkdown || ''); } catch {}
   };
   const printCanvas = () => { try { window.print(); } catch {} };
+  const [fav, setFav] = useState(() => {
+    try {
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? JSON.parse(raw) : [];
+      const last = Array.isArray(arr) ? arr.find(x => x && typeof x === 'object' && x.markdown === itineraryMarkdown) : null;
+      return Boolean(last?.favorite);
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleFav = () => {
+    try {
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        for (const it of arr) {
+          if (it && typeof it === 'object' && it.markdown === itineraryMarkdown) {
+            it.favorite = !Boolean(it.favorite);
+            setFav(Boolean(it.favorite));
+            break;
+          }
+        }
+        localStorage.setItem('voyager_local_journeys', JSON.stringify(arr));
+        try { window.dispatchEvent(new CustomEvent('voyager:itinerarySaved')); } catch {}
+      }
+    } catch {}
+  };
 
   return (
     <AnimatePresence>
@@ -256,6 +284,9 @@ export default function ItineraryCanvas({ itineraryMarkdown, onClose, isSidebarO
                 </button>
               </div>
               <div className="flex items-center gap-2 pr-1">
+                <button onClick={toggleFav} title={fav ? 'Unfavorite' : 'Favorite'} className={`p-2 rounded-md ${fav ? 'text-rose-300 bg-rose-400/10 hover:bg-rose-400/20' : 'text-white/80 hover:bg-white/10'}`}>
+                  <Heart className={`w-4 h-4 ${fav ? 'fill-rose-300' : ''}`} />
+                </button>
                 <button onClick={copyAll} title="Copy markdown" className="p-2 rounded-md text-white/80 hover:bg-white/10">
                   <Copy className="w-4 h-4" />
                 </button>

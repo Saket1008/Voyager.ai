@@ -4,8 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getFirebaseIdToken, auth } from '../lib/firebaseClient';
 import { getApiBase, isApiMisconfiguredForHosting } from '../lib/apiBase';
 import { useAuth } from '../context/AuthContext';
-import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2, ThumbsUp, ThumbsDown, Pencil } from 'lucide-react';
+import { Search, RefreshCw, Copy, Send, Calendar, MapPin, Menu, Check, ChevronLeft, ChevronRight, LogOut, Trash2, ThumbsUp, ThumbsDown, Pencil, Home as HomeIcon } from 'lucide-react';
 import { signOut } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
@@ -1010,6 +1011,7 @@ const ChatMessage = ({ index, message, userName, onCopy, onRegenerate, onReact, 
 };
 
 export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen = () => {}, onItineraryGenerated }) {
+  const navigate = useNavigate();
   const { settings } = useDevSettings();
   const { currentUser } = useAuth();
   const fullNameOrEmail = currentUser?.displayName || currentUser?.email || '';
@@ -1058,6 +1060,9 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   const [dynStartDate, setDynStartDate] = useState('');
   const [dynEndDate, setDynEndDate] = useState('');
   const [dynTravelers, setDynTravelers] = useState(2);
+  const [funNick, setFunNick] = useState(() => {
+    try { return localStorage.getItem('voyager_fun_nick') || ''; } catch { return ''; }
+  });
 
   // Prefill dynamic widgets when backend provides a current value
   useEffect(() => {
@@ -1080,6 +1085,80 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       if (!Number.isNaN(n) && n > 0) setDynTravelers(n);
     }
   }, [currentQuestionType, currentQuestionCurrentValue]);
+
+  // Derive a fun user nickname from saved DNA (onboarding) answers
+  useEffect(() => {
+    try {
+      const key = `voyager:onboard:v1:${currentUser?.uid || 'anon'}`;
+      const raw = localStorage.getItem(key);
+      let nick = '';
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const answers = parsed?.answers || {};
+        const likes = (k) => {
+          const v = answers[k];
+          if (!v) return '';
+          if (Array.isArray(v)) return v.join(' ').toLowerCase();
+          return String(v).toLowerCase();
+        };
+        const s = [likes('interests'), likes('pace'), likes('food'), likes('vibe'), likes('style')].filter(Boolean).join(' ');
+        if (/food|cuisine|eat|veg|restaurant|street/.test(s)) nick = 'Culinary Voyager';
+        else if (/adventure|hike|trail|mountain|surf|ski|thrill/.test(s)) nick = 'Trailblazer';
+        else if (/relax|spa|beach|chill|slow/.test(s)) nick = 'Chill Explorer';
+        else if (/museum|art|history|culture/.test(s)) nick = 'Culture Seeker';
+        else if (/night|party|club|bar/.test(s)) nick = 'Night Owl';
+        else nick = 'Globetrotter';
+      }
+      setFunNick(nick);
+      try { localStorage.setItem('voyager_fun_nick', nick); } catch {}
+    } catch {}
+  }, [currentUser?.uid]);
+
+  // Sidebar subcomponent: lists locally saved itineraries with their chat titles
+  const ItineraryList = ({ isOpen }) => {
+    const [items, setItems] = useState(() => {
+      try { return JSON.parse(localStorage.getItem('voyager_local_journeys') || '[]'); } catch { return []; }
+    });
+    const refresh = () => {
+      try { setItems(JSON.parse(localStorage.getItem('voyager_local_journeys') || '[]')); } catch { setItems([]); }
+    };
+    useEffect(() => {
+      const onSaved = () => refresh();
+      try { window.addEventListener('voyager:itinerarySaved', onSaved); } catch {}
+      return () => { try { window.removeEventListener('voyager:itinerarySaved', onSaved); } catch {} };
+    }, []);
+    if (!Array.isArray(items) || !items.length) {
+      return isOpen ? (<div className="text-white/50 text-xs px-1">No itineraries yet</div>) : null;
+    }
+    return (
+      <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            onClick={() => {
+              try {
+                window.dispatchEvent(new CustomEvent('voyager:openItinerary', { detail: { markdown: it.markdown, plannedDays: it.durationDays || null } }));
+              } catch {}
+            }}
+            className={`w-full ${isOpen ? 'px-2 py-1.5 text-left' : 'p-2 text-center'} rounded-md text-white/80 hover:bg-white/8 transition-colors`}
+            title={it.title || 'Itinerary'}
+          >
+            {isOpen ? (
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-white/60" />
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-white/90">{it.title || 'Itinerary'}</div>
+                  <div className="text-[11px] text-white/60 truncate">{new Date(it.date || Date.now()).toLocaleString()}</div>
+                </div>
+              </div>
+            ) : (
+              <Calendar className="w-4 h-4" />
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  };
 
   // Debounced typeahead for destination input
   useEffect(() => {
@@ -1378,8 +1457,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
         return;
       }
 
-      if (settings.devMode && !settings.useGeminiApi) {
-        // Mock locally and open canvas
+      // Only use mock if explicitly in devMode AND useGeminiApi is false AND running on localhost
+      if (settings.devMode && !settings.useGeminiApi && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
         const markdown = devMockItinerary(flowState);
         if (typeof onItineraryGenerated === 'function') {
           onItineraryGenerated({ markdown, plannedDays: flowState?.durationDays || null });
@@ -1788,7 +1867,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
   const newChat = () => {
     const id = Math.random().toString(36).slice(2, 9);
-    const c = { id, title: 'New chat', messages: [] };
+    const c = { id, title: 'New chat', messages: [], createdAt: Date.now() };
     
     // Reset all states first
     setFlowState({});
@@ -1827,10 +1906,62 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   // Load saved chats & search from localStorage on mount
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('voyager_chats');
+      // Prefer primary key; if absent, migrate from legacy localhost key
+      let raw = localStorage.getItem('voyager_chats');
+      if (!raw || raw === '[]') {
+        const localRaw = localStorage.getItem('voyager_chats_local');
+        if (localRaw) {
+          raw = localRaw;
+          // Migrate to primary key for consistency
+          try { localStorage.setItem('voyager_chats', raw); } catch {}
+        }
+      }
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) setChats(parsed);
+        if (Array.isArray(parsed) && parsed.length) {
+          setChats(parsed);
+        } else {
+          // Fallback: reconstruct chat stubs from chat index and itinerary associations
+          try {
+            const idxRaw = localStorage.getItem('voyager_chat_index');
+            const idx = idxRaw ? JSON.parse(idxRaw) : [];
+            const itRaw = localStorage.getItem('voyager_local_journeys');
+            const it = itRaw ? JSON.parse(itRaw) : [];
+            const byId = new Map();
+            if (Array.isArray(idx)) {
+              idx.forEach((e) => { if (e?.id) byId.set(e.id, { id: e.id, title: e.title || 'New chat', messages: [], createdAt: e.createdAt || null }); });
+            }
+            if (Array.isArray(it)) {
+              it.forEach((e) => {
+                const cid = e?.chatId;
+                if (cid && !byId.has(cid)) byId.set(cid, { id: cid, title: e.title || 'New chat', messages: [], createdAt: null });
+              });
+            }
+            const stubs = Array.from(byId.values());
+            if (stubs.length) setChats(stubs);
+          } catch { /* ignore */ }
+        }
+        // Ensure an active chat is selected on first load
+        try {
+          let aid = localStorage.getItem('voyager_active_chat');
+          if (!aid) {
+            const aidLocal = localStorage.getItem('voyager_active_chat_local');
+            if (aidLocal) {
+              aid = aidLocal;
+              try { localStorage.setItem('voyager_active_chat', aidLocal); } catch {}
+            }
+          }
+          const pickFrom = (() => {
+            try { const r = localStorage.getItem('voyager_chats'); return r ? JSON.parse(r) : null; } catch { return null; }
+          })() || [];
+          if (!aid && Array.isArray(pickFrom) && pickFrom[0]?.id) {
+            setActiveId(pickFrom[0].id);
+            localStorage.setItem('voyager_active_chat', pickFrom[0].id);
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+              localStorage.setItem('voyager_active_chat_local', pickFrom[0].id);
+            }
+          }
+        } catch {}
       }
       const s = localStorage.getItem('voyager_search');
       if (s) setSearch(s);
@@ -1839,11 +1970,50 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     }
   }, []);
 
-  // Persist chats and search to localStorage
+  // Load active chat and flow state on mount
   useEffect(() => {
-    try { 
-      localStorage.setItem('voyager_chats', JSON.stringify(chats)); 
-    } catch (e) { 
+    try {
+      // Active chat id with localhost fallback + migration
+      let aid = localStorage.getItem('voyager_active_chat');
+      if (!aid) {
+        const aidLocal = localStorage.getItem('voyager_active_chat_local');
+        if (aidLocal) {
+          aid = aidLocal;
+          try { localStorage.setItem('voyager_active_chat', aidLocal); } catch {}
+        }
+      }
+      if (aid) setActiveId(aid);
+
+      // Flow state with localhost fallback + migration
+      let rawFlow = localStorage.getItem('voyager_flow_state');
+      if (!rawFlow) {
+        const rawFlowLocal = localStorage.getItem('voyager_flow_state_local');
+        if (rawFlowLocal) {
+          rawFlow = rawFlowLocal;
+          try { localStorage.setItem('voyager_flow_state', rawFlowLocal); } catch {}
+        }
+      }
+      if (rawFlow) {
+        const parsed = JSON.parse(rawFlow);
+        if (parsed && typeof parsed === 'object') setFlowState(parsed);
+      }
+    } catch {}
+  }, []);
+
+  // Persist chats and search to localStorage (always, even in local mode)
+  useEffect(() => {
+    try {
+      localStorage.setItem('voyager_chats', JSON.stringify(chats));
+      // Also persist in local mode for dev
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        localStorage.setItem('voyager_chats_local', JSON.stringify(chats));
+      }
+      // Maintain a lightweight index of chat metadata for quick selection and association
+      try {
+        const index = chats.map(c => ({ id: c.id, title: c.title || 'New chat', createdAt: c.createdAt || null }));
+        localStorage.setItem('voyager_chat_index', JSON.stringify(index));
+      } catch {}
+    } catch (e) {
       console.error('Failed to save chats:', e);
     }
   }, [chats]);
@@ -1855,6 +2025,38 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
       console.error('Failed to save search:', e);
     }
   }, [search]);
+
+  // Persist active chat id
+  useEffect(() => {
+    try {
+      localStorage.setItem('voyager_active_chat', activeId);
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        localStorage.setItem('voyager_active_chat_local', activeId);
+      }
+    } catch {}
+  }, [activeId]);
+
+  // Allow other components to programmatically select a chat
+  useEffect(() => {
+    const onSetActive = (ev) => {
+      try {
+        const id = ev?.detail?.id;
+        if (id && id !== activeId) setActiveId(id);
+      } catch {}
+    };
+    try { window.addEventListener('voyager:setActiveChat', onSetActive); } catch {}
+    return () => { try { window.removeEventListener('voyager:setActiveChat', onSetActive); } catch {} };
+  }, [activeId]);
+
+  // Persist flow state for continuity across refreshes
+  useEffect(() => {
+    try {
+      localStorage.setItem('voyager_flow_state', JSON.stringify(flowState || {}));
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        localStorage.setItem('voyager_flow_state_local', JSON.stringify(flowState || {}));
+      }
+    } catch {}
+  }, [flowState]);
 
   // Debounced typeahead for bottom composer when entering destinations
   useEffect(() => {
@@ -2013,12 +2215,19 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                   >
                     <Menu className="w-5 h-5" />
                   </button>
+                  <button
+                    className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                    title="Home"
+                    onClick={() => { try { navigate('/'); window.dispatchEvent(new CustomEvent('voyager:goHome')); } catch { navigate('/'); } }}
+                  >
+                    <HomeIcon className="w-5 h-5" />
+                  </button>
                 </div>
                 <div className="mt-4 flex flex-col items-center text-center px-0">
                   <img src="/logo-secondary.png" alt="Voyager brand" className="h-16 w-16 rounded-full object-contain" />
                   <div className="mt-3">
                     <div className="text-3xl font-semibold tracking-tight leading-tight">Voyager.ai</div>
-                    <div className="text-sm text-white/70 mt-1">Welcome, {firstName || 'Traveler'}</div>
+                    <div className="text-sm text-white/70 mt-1">Welcome, {funNick || firstName || 'Traveler'}</div>
                   </div>
                 </div>
               </>
@@ -2030,6 +2239,13 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                   onClick={() => setIsSidebarOpen && setIsSidebarOpen(true)}
                 >
                   <Menu className="w-5 h-5" />
+                </button>
+                <button
+                  className="p-2 rounded-md text-white/80 hover:bg-white/10"
+                  title="Home"
+                  onClick={() => { try { navigate('/'); window.dispatchEvent(new CustomEvent('voyager:goHome')); } catch { navigate('/'); } }}
+                >
+                  <HomeIcon className="w-5 h-5" />
                 </button>
                 <button
                   className="p-1.5 rounded-lg text-white/90 hover:bg-white/10"
@@ -2097,7 +2313,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
 
           <div className="w-full border-t border-white/6 pt-3 mt-2 space-y-2 overflow-y-auto flex-1 min-h-0">
             {(() => {
-              const q = search.trim().toLowerCase();
+              // Only filter when the search UI is open and a query is present
+              const q = searchOpen ? search.trim().toLowerCase() : '';
               const visible = q ? chats.filter((c) => (c.title || '').toLowerCase().includes(q)) : chats;
               return visible.map((c) => (
                 <div
@@ -2133,6 +2350,24 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                 </div>
               ));
             })()}
+          </div>
+
+          {/* My Itineraries: open a semi-transparent overlay list */}
+          <div className="w-full mt-4 pt-3 border-t border-white/6">
+            <div className={`${isSidebarOpen ? 'px-1' : 'flex items-center justify-center'}`}>
+              <button
+                onClick={() => {
+                  try { window.dispatchEvent(new CustomEvent('voyager:openItineraryList')); } catch {}
+                }}
+                className={`${isSidebarOpen ? 'w-full px-2 py-1.5 text-left rounded-md bg-white/5 hover:bg-white/10' : 'p-2 rounded-md bg-white/5 hover:bg-white/10'}`}
+                title="My Itineraries"
+              >
+                <span className="inline-flex items-center gap-2 text-white/80 text-sm">
+                  <Calendar className="w-4 h-4 text-white/70" />
+                  {isSidebarOpen ? 'My Itineraries' : ''}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Profile / Logout at bottom */}
@@ -2311,7 +2546,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                           />
                           {/* Typeahead dropdown */}
                           {currentQuestionType === 'destination' && dynSuggestOpen && dynSuggestions.length > 0 && (
-                            <div className="absolute left-0 right-14 top-full mt-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-20">
+                            <div className="absolute left-0 right-14 bottom-full mb-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-40 shadow-xl">
                               {dynSuggestions.map((opt, idx) => (
                                 <button
                                   key={idx}
@@ -2596,7 +2831,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         disabled={isTyping}
                       />
                       {stage === 'input_locations' && inputSuggestOpen && inputSuggestions.length > 0 && (
-                        <div className="absolute left-4 right-24 top-full mt-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-20">
+                        <div className="absolute left-4 right-24 bottom-full mb-2 max-h-56 overflow-auto rounded-lg border border-white/15 bg-black/70 backdrop-blur-md z-40 shadow-xl">
                           {inputSuggestions.map((opt, idx) => (
                             <button
                               key={idx}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { auth, db, isFirebaseReady } from '../lib/firebaseClient';
 import { getApiBase } from '../lib/apiBase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { toast } from '../lib/toast';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 export default function JourneyHistory() {
@@ -37,7 +38,7 @@ export default function JourneyHistory() {
       <div className="text-xs font-semibold text-white/80 mb-2">My Journeys</div>
       <div className="mb-2 flex gap-2">
         <button onClick={async () => {
-          if (!auth) return alert('Login required to save journeys');
+          if (!auth) { toast.warn('Login required to save journeys'); return; }
           setSaving(true);
           try {
             const token = await auth.currentUser.getIdToken();
@@ -47,10 +48,10 @@ export default function JourneyHistory() {
               body: JSON.stringify({ title: 'Saved from UI', prompt: 'Saved via JourneyHistory' }),
             });
             if (!res.ok) throw new Error('Save failed');
-            alert('Saved');
+            toast.success('Saved');
           } catch (e) {
             console.error('Save journey failed', e);
-            alert('Save failed');
+            toast.error('Save failed');
           } finally { setSaving(false); }
         }} className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs hover:bg-white/20">{saving ? 'Saving…' : 'Save'}</button>
       </div>

@@ -11,6 +11,79 @@ import ChatboxStage from '../components/ChatboxStage.jsx'
 import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
 
+function ItineraryOverlayList({ onOpen }) {
+  const [items, setItems] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('voyager_local_journeys') || '[]'); } catch { return []; }
+  });
+  useEffect(() => {
+    const refresh = () => {
+      try { setItems(JSON.parse(localStorage.getItem('voyager_local_journeys') || '[]')); } catch { setItems([]); }
+    };
+    try { window.addEventListener('voyager:itinerarySaved', refresh); } catch {}
+    return () => { try { window.removeEventListener('voyager:itinerarySaved', refresh); } catch {} };
+  }, []);
+  const toggleFav = (id) => {
+    try {
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? JSON.parse(raw) : [];
+      const idx = Array.isArray(arr) ? arr.findIndex(x => x.id === id) : -1;
+      if (idx >= 0) {
+        arr[idx].favorite = !Boolean(arr[idx].favorite);
+        localStorage.setItem('voyager_local_journeys', JSON.stringify(arr));
+        setItems(arr);
+        try { window.dispatchEvent(new CustomEvent('voyager:itinerarySaved')); } catch {}
+      }
+    } catch {}
+  };
+  const deleteItem = (id) => {
+    try {
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? JSON.parse(raw) : [];
+      const next = Array.isArray(arr) ? arr.filter(x => x.id !== id) : [];
+      localStorage.setItem('voyager_local_journeys', JSON.stringify(next));
+      setItems(next);
+      try { window.dispatchEvent(new CustomEvent('voyager:itinerarySaved')); } catch {}
+    } catch {}
+  };
+  return (
+    <div className="divide-y divide-white/10">
+      {(!Array.isArray(items) || !items.length) && (
+        <div className="text-white/70 text-sm">No itineraries yet</div>
+      )}
+      {Array.isArray(items) && items.map((it) => (
+        <div key={it.id} className="py-3 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-white/90 truncate">{it.title || 'Itinerary'}</div>
+            <div className="text-xs text-white/60 truncate">
+              {it.chatId ? <span className="opacity-80">Chat: {it.chatId}</span> : null}
+              {it.date ? <span className="ml-2 opacity-80">Created: {new Date(it.date).toLocaleString()}</span> : null}
+              {it.startDate || it.endDate ? <span className="ml-2 opacity-80">Travel: {it.startDate || '—'}{it.endDate ? ` → ${it.endDate}` : ''}</span> : null}
+            </div>
+          </div>
+          <button
+            onClick={() => toggleFav(it.id)}
+            title={it.favorite ? 'Unfavorite' : 'Favorite'}
+            className={`px-2 py-1 rounded-md border ${it.favorite ? 'border-rose-300 text-rose-300 bg-rose-400/10' : 'border-white/20 text-white/80 hover:bg-white/10'}`}
+          >
+            {it.favorite ? '★' : '☆'}
+          </button>
+          <button
+            onClick={() => deleteItem(it.id)}
+            className="px-2 py-1 rounded-md border border-white/20 text-white/70 hover:bg-white/10"
+            title="Delete itinerary"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => onOpen && onOpen(it)}
+            className="px-3 py-1.5 rounded-md bg-green-500 text-black font-semibold hover:bg-green-400"
+          >Open</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) {
   const navigate = useNavigate();
   const { settings } = useDevSettings();
@@ -19,7 +92,13 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const showLanding = settings.devMode ? settings.showLandingStart !== false : true;
   const enableWormhole = settings.devMode ? settings.enableWormhole !== false : true;
   const startAtChat = settings.devMode ? !!settings.startAtChat : false;
-  const [currentView, setCurrentView] = useState('loading')
+  const [currentView, setCurrentView] = useState(() => {
+    // On localhost, land on the Begin Journey landing by default
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return 'main';
+    }
+    return 'loading';
+  })
   const [showTitle, setShowTitle] = useState(false)
   const [showButton, setShowButton] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -30,6 +109,7 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   // When an itinerary is generated we store a normalized shape: { markdown: string, plannedDays?: number|null }
   const [itineraryData, setItineraryData] = useState(null)
   const [isItineraryOpen, setIsItineraryOpen] = useState(false)
+  const [showItineraryList, setShowItineraryList] = useState(false)
 
   const handleStartJourney = () => {
     setIsAnimating(true)
@@ -56,8 +136,45 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
     // Support both legacy string and new object payload { markdown, plannedDays }
     const markdown = typeof payload === 'string' ? payload : (payload?.markdown || '')
     const plannedDays = typeof payload === 'object' ? (payload?.plannedDays ?? null) : null
-    setItineraryData({ markdown, plannedDays })
+    const next = { markdown, plannedDays }
+    setItineraryData(next)
     setIsItineraryOpen(true)
+    try {
+      localStorage.setItem('voyager_last_itinerary', JSON.stringify(next));
+      localStorage.setItem('voyager_itinerary_open', '1');
+      // Append to local journeys list so Live mode can use them when offline/local
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? (JSON.parse(raw) || []) : [];
+      // Associate itinerary with current chat title if available
+      let title = 'Itinerary';
+      try {
+        const chatIdx = JSON.parse(localStorage.getItem('voyager_chat_index') || '[]');
+        const activeId = localStorage.getItem('voyager_active_chat');
+        const found = Array.isArray(chatIdx) ? chatIdx.find(c => c.id === activeId) : null;
+        if (found && found.title) title = found.title;
+      } catch {}
+      const travelFlow = (() => { try { return JSON.parse(localStorage.getItem('voyager_flow_state') || '{}') } catch { return {} }})();
+      const itemId = `loc-${Date.now()}`;
+      const item = {
+        id: itemId,
+        title,
+        date: new Date().toISOString(),
+        favorite: false,
+        markdown: next.markdown,
+        durationDays: next.plannedDays || null,
+        locations: null,
+        chatId: (() => { try { return localStorage.getItem('voyager_active_chat') || null; } catch { return null; } })(),
+        startDate: travelFlow?.startDate || null,
+        endDate: travelFlow?.endDate || null,
+      };
+      arr.unshift(item);
+      // cap to last 20
+      while (arr.length > 20) arr.pop();
+      localStorage.setItem('voyager_local_journeys', JSON.stringify(arr));
+      // Keep selected itinerary id in state for favorite toggles
+      setItineraryData(prev => ({ ...(prev || next), id: itemId }))
+      try { window.dispatchEvent(new CustomEvent('voyager:itinerarySaved')); } catch {}
+    } catch {}
     try { setIsSidebarOpen(false) } catch {}
   }
 
@@ -69,7 +186,81 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSplash]);
+  }, [showSplash, currentView]);
+
+  // If we land directly on 'main' (e.g., clicking Home navigates here), reveal title/buttons immediately
+  useEffect(() => {
+    if (currentView === 'main') {
+      // Only set once to avoid flicker loops
+      if (!showTitle) setShowTitle(true);
+      if (!showButton) setShowButton(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView]);
+
+  // Restore last itinerary on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('voyager_last_itinerary');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.markdown) {
+          setItineraryData(parsed);
+          const open = localStorage.getItem('voyager_itinerary_open') === '1';
+          setIsItineraryOpen(open);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Persist open/close state
+  useEffect(() => {
+    try { localStorage.setItem('voyager_itinerary_open', isItineraryOpen ? '1' : '0'); } catch {}
+  }, [isItineraryOpen]);
+
+  // React to global home navigation to ensure main view is visible
+  useEffect(() => {
+    const handler = () => {
+      setIsItineraryOpen(false);
+      setShowOneClick(false);
+      setShowWormhole(false);
+      setIsAnimating(false);
+      // Show the Begin Journey landing screen
+      setCurrentView('main');
+      setShowTitle(true);
+      setShowButton(true);
+      try { setIsSidebarOpen(false) } catch {}
+    };
+    try { window.addEventListener('voyager:goHome', handler); } catch {}
+    return () => { try { window.removeEventListener('voyager:goHome', handler); } catch {} };
+  }, []);
+
+  // Allow opening a previously saved itinerary from the sidebar
+  useEffect(() => {
+    const handler = (ev) => {
+      try {
+        const detail = ev?.detail || {};
+        const markdown = detail.markdown || '';
+        const plannedDays = detail.plannedDays ?? null;
+        if (markdown) {
+          const next = { markdown, plannedDays };
+          setItineraryData(next);
+          setIsItineraryOpen(true);
+          setCurrentView('final');
+          try { setIsSidebarOpen(false) } catch {}
+        }
+      } catch {}
+    };
+    try { window.addEventListener('voyager:openItinerary', handler); } catch {}
+    return () => { try { window.removeEventListener('voyager:openItinerary', handler); } catch {} };
+  }, []);
+
+  // Toggle itinerary list overlay
+  useEffect(() => {
+    const handler = () => setShowItineraryList(true);
+    try { window.addEventListener('voyager:openItineraryList', handler); } catch {}
+    return () => { try { window.removeEventListener('voyager:openItineraryList', handler); } catch {} };
+  }, []);
 
 
   return (
@@ -102,6 +293,14 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
                 style={{ backdropFilter: 'blur(10px)' }}
               >
                 EXPLORE FEATURES
+              </button>
+              <button
+                onClick={() => navigate('/dreams')}
+                className={`group relative bg-transparent border-2 border-emerald-300 text-emerald-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+                title="Plan and collaborate on dream destinations"
+              >
+                DREAM DESTINATIONS
               </button>
               <button
                 onClick={() => navigate('/live')}
@@ -164,8 +363,17 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
             </motion.div>
           </div>
 
-          {/* Reopen chip when canvas closed but data exists */}
-          {itineraryData && !isItineraryOpen && (
+          {/* Reopen chip only if the active chat has at least one saved itinerary */}
+          {(() => {
+            try {
+              if (isItineraryOpen) return false;
+              const aid = localStorage.getItem('voyager_active_chat');
+              const raw = localStorage.getItem('voyager_local_journeys');
+              const arr = raw ? JSON.parse(raw) : [];
+              if (!Array.isArray(arr)) return false;
+              return arr.some(x => x && x.chatId && aid && x.chatId === aid);
+            } catch { return false; }
+          })() && (
             <div className="fixed bottom-4 right-4 z-10">
               <button
                 onClick={() => setIsItineraryOpen(true)}
@@ -177,6 +385,31 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* My Itineraries Overlay */}
+      {showItineraryList && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0 flex items-start justify-center pt-16 px-4">
+            <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-white/10 text-white shadow-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">My Itineraries</div>
+                <button onClick={() => setShowItineraryList(false)} className="px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20 border border-white/10 text-white/80">Close</button>
+              </div>
+              <ItineraryOverlayList onOpen={(item) => {
+                try {
+                  // Open the itinerary in canvas
+                  window.dispatchEvent(new CustomEvent('voyager:openItinerary', { detail: { markdown: item.markdown, plannedDays: item.durationDays || null, chatId: item.chatId || null } }));
+                  // Also focus the associated chat in the sidebar if available
+                  if (item.chatId) {
+                    window.dispatchEvent(new CustomEvent('voyager:setActiveChat', { detail: { id: item.chatId } }));
+                  }
+                  setShowItineraryList(false);
+                } catch {}
+              }} />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Simple wormhole overlay */}

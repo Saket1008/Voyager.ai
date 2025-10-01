@@ -560,6 +560,58 @@ export async function generateItineraryMarkdown({ user, travelProfile, tripState
   }
 }
 
+/**
+ * Estimate total trip budget in INR using Gemini.
+ * Input: { destination, days, travelers }
+ * Returns: number (INR). Fallback: 25000.
+ */
+export async function estimateDreamBudget({ destination, days, travelers } = {}) {
+  const FALLBACK = 25000;
+  try {
+    const dest = String(destination || '').trim() || 'Unknown';
+    const d = Number(days) || 1;
+    const t = Number(travelers) || 1;
+
+    const prompt = `Act as a travel budget planner. Estimate the total cost for a trip.
+Destination: ${dest}
+Duration: ${d} days
+Travelers: ${t}
+Include transportation, accommodation, food, and activities.
+Give a single numeric estimate in INR.`;
+
+    const text = await callGemini({ prompt });
+    const raw = String(text || '').trim();
+    // Normalize common formats: code-fences, commas, currency symbols, units like lakh/crore/k
+    const cleaned = raw.replace(/```[a-z]*\n?|```/gi, '').trim();
+    // Try to detect units (lakh/crore/thousand/k) and scale accordingly
+    const lower = cleaned.toLowerCase();
+    const unitMultiplier = (() => {
+      if (/crore/.test(lower)) return 10000000; // 1 crore = 10,000,000
+      if (/lakh|lac/.test(lower)) return 100000; // 1 lakh = 100,000
+      if (/thousand/.test(lower)) return 1000;
+      // Handle patterns like "1.2k" (case-insensitive)
+      if (/\b\d+(?:\.\d+)?\s*k\b/i.test(cleaned)) return 1000;
+      return 1;
+    })();
+
+    // Extract first numeric token (supports decimals). Remove commas first.
+    const numMatch = cleaned.replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
+    if (!numMatch) return FALLBACK;
+    let value = parseFloat(numMatch[1]);
+    if (!isFinite(value) || value <= 0) return FALLBACK;
+
+    // If currency appears to be in INR already, unitMultiplier adjusts scale if textual units present
+    value = value * unitMultiplier;
+    // Guardrails: clamp to reasonable range (₹5k–₹50L) but keep number if within
+    if (value < 5000) return FALLBACK;
+    if (value > 5000000) return Math.round(value); // still return, consumer can format
+    return Math.round(value);
+  } catch (err) {
+    console.warn('[Budget] estimateDreamBudget failed:', err?.message);
+    return FALLBACK;
+  }
+}
+
 // Catchy chat title + subtitle for sidebar using Gemini; safe fallbacks when key is missing
 export async function generateChatTitle({ tripState = {} }) {
   const t = tripState || {};
