@@ -395,6 +395,8 @@ export default function DreamDestinations() {
     setShowForm(prev => !prev);
     if (!showForm) {
       setMode(null);
+      // bring form into view when opening
+      try { setTimeout(() => document.getElementById('dreams-form-root')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0); } catch {}
     }
   };
 
@@ -407,6 +409,7 @@ export default function DreamDestinations() {
               <span className="mr-2">🌍</span>
               <span className="bg-gradient-to-r from-emerald-300 to-sky-300 bg-clip-text text-transparent">Dream Destinations</span>
             </h1>
+            <div className="hidden sm:block text-xs text-white/70">Plan dream trips, track savings, and collaborate with friends.</div>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => navigate('/')} className="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 px-3 py-2 text-sm">
@@ -432,7 +435,7 @@ export default function DreamDestinations() {
           </div>
         ) : null}
 
-        <div className={`rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-md overflow-hidden transition-all duration-300 ${showForm ? 'opacity-100 max-h-[2000px] mt-4 pointer-events-auto' : 'opacity-0 max-h-0 mt-0 pointer-events-none'}`}>
+  <div id="dreams-form-root" className={`rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-md overflow-hidden transition-all duration-300 ${showForm ? 'opacity-100 max-h-[2000px] mt-4 pointer-events-auto' : 'opacity-0 max-h-0 mt-0 pointer-events-none'}`}>
           {/* Step 1: Choose mode */}
           {mode === null && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -592,7 +595,24 @@ export default function DreamDestinations() {
           )}
         </div>
 
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Mini stats */}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
+            <div className="text-white/60">Trips</div>
+            <div className="text-xl font-semibold">{items.length}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
+            <div className="text-white/60">Total Saved</div>
+            <div className="text-xl font-semibold">₹ {items.reduce((s, t) => s + (Number(t.savedAmount)||0), 0).toLocaleString('en-IN')}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
+            <div className="text-white/60">Avg. Goal</div>
+            <div className="text-xl font-semibold">₹ {items.length ? Math.round(items.reduce((s, t) => s + (Number(t.budgetTotal)||0), 0)/items.length).toLocaleString('en-IN') : 0}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 text-sm text-white/70">Your Dream Trips</div>
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {loading ? (
             Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="rounded-2xl h-40 border border-white/10 bg-white/5 animate-pulse" />

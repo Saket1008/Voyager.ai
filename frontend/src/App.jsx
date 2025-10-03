@@ -15,6 +15,7 @@ import SpaceBackground from './components/SpaceBackground';
 import HomeButton from './components/HomeButton.jsx';
 import DreamDestinations from './pages/DreamDestinations.jsx';
 import ToastContainer from './components/ToastContainer.jsx';
+import MemoryWeaverPage from './pages/MemoryWeaverPage.jsx';
 
 function AppContent() {
   const { currentUser, loading } = useAuth();
@@ -80,6 +81,7 @@ function AppContent() {
             <Route path="/live" element={<LiveAdventurePage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/dreams" element={<DreamDestinations />} />
+            <Route path="/memory" element={<MemoryWeaverPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}

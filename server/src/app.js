@@ -18,6 +18,7 @@ import liveRerouteRouter from './routes/liveReroute.js';
 import liveTipsRouter from './routes/liveTips.js';
 import diagnosticsRouter from './routes/diagnostics.js';
 import dreamsRouter from './routes/dreams.js';
+import memoryRouter from './routes/memory.js';
 
 export function buildApp() {
   const app = express();
@@ -59,6 +60,7 @@ export function buildApp() {
   app.use('/api/live/reroute', authMiddleware, liveRerouteRouter);
   app.use('/api/live/tips', authMiddleware, liveTipsRouter);
   app.use('/api/dreams', authMiddleware, dreamsRouter);
+  app.use('/api/memory', authMiddleware, memoryRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;

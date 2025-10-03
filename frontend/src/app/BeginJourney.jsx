@@ -157,6 +157,13 @@ export default function BeginJourney() {
           >
             <Rocket className="h-5 w-5" /> {HERO.cta}
           </button>
+          <button
+            onClick={() => navigate('/memory')}
+            className="ml-3 inline-flex items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-400/10 px-6 py-3 text-amber-100 backdrop-blur hover:bg-amber-400/20 hover:shadow-[0_0_25px_rgba(251,191,36,0.25)]"
+            title="Generate a travel journal from your journeys"
+          >
+            📖 Memory Weaver
+          </button>
           </motion.div>
           <button
             onClick={() => navigate('/dreams')}

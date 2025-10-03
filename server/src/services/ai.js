@@ -672,3 +672,74 @@ Context:
     return { title: fallbackTitle(), subtitle: fallbackSubtitle(), error: e?.message };
   }
 }
+
+/**
+ * Generate an AI-crafted travel journal (Memory Weaver) from a completed journey.
+ * Input: { journey: { title, markdown, tripState, durationDays, locations, date }, user?: { displayName } }
+ * Returns: markdown string. Falls back to a deterministic, readable journal if AI is unavailable.
+ */
+export async function generateMemoryWeaver({ journey = {}, user = {} } = {}) {
+  try {
+    const title = String(journey.title || 'Journey').trim();
+    const itineraryMd = String(journey.markdown || '').trim();
+    const tripState = journey.tripState || {};
+    const locations = Array.isArray(journey.locations) ? journey.locations : (tripState.locations || []);
+    const region = journey.region || tripState.region || '';
+    const days = Number(journey.durationDays || tripState.durationDays || tripState.duration || 0) || null;
+    const when = journey.date || (tripState.startDate && tripState.endDate ? `${tripState.startDate} to ${tripState.endDate}` : null);
+
+    const who = user?.displayName || 'A traveler';
+    const where = (locations && locations.length) ? locations.join(', ') : (region || 'Destination');
+
+    const prompt = `You are Voyager.AI, an evocative yet concise travel writer. Convert the given structured itinerary and trip details into a first-person travel journal in rich Markdown.
+
+Constraints:
+- Keep it grounded ONLY in the provided itinerary and trip details; do not invent new cities or timeline changes.
+- Length: about 600–1200 words.
+- Use tasteful section headings. Begin with a 1–2 line prologue setting the tone.
+- Organize by days or chapters, reflecting on highlights, feelings, small details like sounds, scents, textures, and interactions.
+- End with a reflective closing paragraph and 3–5 bullet "What I’ll remember" list.
+- Output Markdown only. No code fences.
+
+Trip Title: ${title}
+Traveler: ${who}
+Where: ${where}
+When: ${when || 'Unspecified dates'}
+Days: ${days || 'n/a'}
+
+Trip State (JSON):
+${JSON.stringify(tripState, null, 2)}
+
+Itinerary (Markdown):
+${itineraryMd || '(Itinerary not provided; infer structure from trip state.)'}
+`;
+
+    const md = await callGemini({ prompt });
+    const out = String(md || '').trim();
+    if (out) return out;
+    throw new Error('Empty AI output');
+  } catch (e) {
+    console.warn('[MemoryWeaver] AI failed, returning fallback:', e?.message || e);
+    // Fallback deterministic journal
+    const title = String(journey.title || 'Journey').trim();
+    const locations = Array.isArray(journey.locations) ? journey.locations : (journey.tripState?.locations || []);
+    const region = journey.region || journey.tripState?.region || '';
+    const where = (locations && locations.length) ? locations.join(', ') : (region || 'Destination');
+    const days = Number(journey.durationDays || journey.tripState?.durationDays) || null;
+    const when = journey.date || (journey.tripState?.startDate && journey.tripState?.endDate ? `${journey.tripState.startDate} to ${journey.tripState.endDate}` : null);
+    const who = user?.displayName || 'A traveler';
+    let md = `# ${title} — A Travel Journal\n\n`;
+    md += `**Traveler:** ${who}  \n`;
+    md += `**Where:** ${where}  \n`;
+    if (when) md += `**When:** ${when}  \n`;
+    if (days) md += `**Duration:** ${days} day${days>1?'s':''}  \n`;
+    md += `\n---\n\n`;
+    md += `## Prologue\nI set out for ${where} with a simple hope: to collect small moments that would linger long after the trip ended. The path that followed was a string of gentle surprises—quiet corners, warm conversations, and the rhythm of days that seemed to stretch just enough.\n\n`;
+    const count = days || 3;
+    for (let d = 1; d <= count; d++) {
+      md += `### Day ${d}\nMorning light, fresh air, and an eagerness to explore defined the start of day ${d}. I kept my pace balanced—enough time for a landmark, a stroll through a market, and a lingering coffee where the city seemed to exhale. Afternoon drew me into a museum or a viewpoint, where stories and vistas offered quiet company. By evening, the city softened; dinner felt unhurried, conversations warmer, and the walk back unrolled under streetlights.\n\n`;
+    }
+    md += `## What I'll Remember\n- The way mornings felt unhurried yet full of possibility.\n- A particular street or view that still flashes in my mind.\n- Warm, simple meals that tasted like comfort.\n- Strangers’ kindness and easy directions.\n- The feeling of arriving home, carrying an echo of ${where}.\n`;
+    return md;
+  }
+}
