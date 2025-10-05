@@ -1,0 +1,10 @@
+# Python requirements for supplementary tooling or notebooks (if used)
+# This project is primarily Node.js/React; Python is optional.
+# Include common data/AI packages to ease evaluation if Python is used.
+
+python>=3.10
+notebook>=7.2.0
+pandas>=2.2.2
+numpy>=2.1.1
+matplotlib>=3.9.0
+requests>=2.32.3

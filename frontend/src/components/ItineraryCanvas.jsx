@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sunrise, Sun, Moon, Utensils, Info, Copy, Printer, Star, Heart } from 'lucide-react';
+import { X, Sunrise, Sun, Moon, Utensils, Info, Copy, Printer, Star, Heart, Plane } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 // Parse markdown into days based on headings like "### Day N: Title"
 function parseItinerary(markdown) {
@@ -164,6 +165,7 @@ export default function ItineraryCanvas({ itineraryMarkdown, onClose, isSidebarO
   // activeTab: 'overview' | number (1-based day) | 'must' | 'tips'
   const [activeTab, setActiveTab] = useState('overview');
   const scrollRef = useRef(null);
+  const navigate = useNavigate();
   if (!itinerary) return null;
 
   const { tripTitle } = itinerary;
@@ -219,6 +221,28 @@ export default function ItineraryCanvas({ itineraryMarkdown, onClose, isSidebarO
         try { window.dispatchEvent(new CustomEvent('voyager:itinerarySaved')); } catch {}
       }
     } catch {}
+  };
+
+  const openBookings = () => {
+    // Try to find the stored journey item that matches this markdown to extract metadata
+    let meta = {};
+    try {
+      const raw = localStorage.getItem('voyager_local_journeys');
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        const found = arr.find(x => x && typeof x === 'object' && x.markdown === itineraryMarkdown);
+        if (found) {
+          meta = {
+            tripState: found.tripState || {},
+            durationDays: found.durationDays || null,
+            locations: found.locations || (found.tripState?.locations || null),
+            title: found.title || itinerary.tripTitle || 'Journey',
+          };
+        }
+      }
+    } catch {}
+    const state = { itinerary: { markdown: itineraryMarkdown, title: itinerary.tripTitle, ...meta } };
+    navigate('/bookings', { state });
   };
 
   return (
@@ -284,6 +308,9 @@ export default function ItineraryCanvas({ itineraryMarkdown, onClose, isSidebarO
                 </button>
               </div>
               <div className="flex items-center gap-2 pr-1">
+                <button onClick={openBookings} title="View all flights and trains" className="p-2 rounded-md text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20">
+                  <Plane className="w-4 h-4" />
+                </button>
                 <button onClick={toggleFav} title={fav ? 'Unfavorite' : 'Favorite'} className={`p-2 rounded-md ${fav ? 'text-rose-300 bg-rose-400/10 hover:bg-rose-400/20' : 'text-white/80 hover:bg-white/10'}`}>
                   <Heart className={`w-4 h-4 ${fav ? 'fill-rose-300' : ''}`} />
                 </button>

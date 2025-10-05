@@ -250,3 +250,13 @@ The codebase favors clarity and maintainability. PRs that improve DX (types, doc
 - Optional Firebase: set VITE_FIREBASE_* (frontend) and one of FIREBASE_SERVICE_ACCOUNT envs (server)
 - Run: npm run dev → open http://localhost:5173
 - If unauthenticated locally, set AUTH_BYPASS_DEV=true while developing
+
+## Submissions
+
+Provide links to your demo video and any supplementary resources here:
+
+- Demo video URL: <add-your-video-link-here>
+- Slide deck or document: <add-your-doc-link-here>
+- Deployed demo (optional): <add-your-live-link-here>
+
+For hackathon submissions, ensure the GitHub repository is public and a tag named `SamsungPRISMGenAIHackathon2025` is pushed for the final commit. See the commands below.

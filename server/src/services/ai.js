@@ -674,6 +674,91 @@ Context:
 }
 
 /**
+ * Generate transport options (flights and trains) for a segment using Gemini.
+ * Input: { from, to, date }
+ * Returns: { flights: Option[], trains: Option[] }
+ * Each Option: { carrier, departTime, arriveTime, duration, priceINR, url?, label? }
+ * Applies fallback mock options if AI fails or key is missing.
+ */
+export async function generateTransportOptions({ from, to, date } = {}) {
+  // Fallback options as a mixed array per the new spec
+  const FALLBACK = () => ([
+    { type: 'flight', carrier: 'IndiGo 6E-205', departTime: '08:30', arriveTime: '10:00', duration: '1h 30m', priceINR: 3899, url: 'https://www.google.com/travel/flights' },
+    { type: 'train', carrier: 'Express 12049', departTime: '07:10', arriveTime: '09:00', duration: '1h 50m', priceINR: 790, url: 'https://www.irctc.co.in/' },
+    { type: 'flight', carrier: 'Air India AI-301', departTime: '11:15', arriveTime: '13:15', duration: '2h 00m', priceINR: 3299, url: 'https://www.google.com/travel/flights' },
+  ]);
+
+  const parseDurationMins = (s) => {
+    if (!s) return Infinity;
+    const h = /([0-9]+)\s*h/i.exec(s);
+    const m = /([0-9]+)\s*m/i.exec(s);
+    const hh = h ? parseInt(h[1], 10) : 0;
+    const mm = m ? parseInt(m[1], 10) : 0;
+    return hh * 60 + mm;
+  };
+
+  const assignLabels = (opts = []) => {
+    if (!Array.isArray(opts) || !opts.length) return [];
+    const prices = opts.map((o) => Number(o.priceINR || o.price || Infinity));
+    const durs = opts.map((o) => parseDurationMins(o.duration));
+    let cheapestIdx = -1, fastestIdx = -1;
+    prices.forEach((p, i) => { if (isFinite(p) && (cheapestIdx === -1 || p < prices[cheapestIdx])) cheapestIdx = i; });
+    durs.forEach((d, i) => { if (isFinite(d) && (fastestIdx === -1 || d < durs[fastestIdx])) fastestIdx = i; });
+    return opts.map((o, i) => ({
+      ...o,
+      label: i === fastestIdx ? 'Fastest' : (i === cheapestIdx ? 'Cheapest' : (i === 0 ? 'Best' : (o.label || undefined))),
+    }));
+  };
+
+  try {
+    const f = String(from || '').trim() || 'Origin';
+    const t = String(to || '').trim() || 'Destination';
+    const when = String(date || '').trim();
+    if (!process.env.GEMINI_API_KEY) {
+      return assignLabels(FALLBACK());
+    }
+    const prompt = `Act as a travel booking assistant.
+Find 3 recommended travel options between ${f} and ${t}${when ? ` for ${when}` : ''}.
+Include both flights and trains if applicable.
+For each option, give:
+- type (flight/train/bus)
+- carrier or train name
+- departure and arrival times
+- duration
+- approximate price (INR)
+- label: Best, Cheapest, or Fastest
+Return as JSON array.`;
+    const text = await callGemini({ prompt });
+    const cleaned = String(text || '').replace(/```json\n?|```/gi, '').trim();
+    let parsed = null;
+    try { parsed = JSON.parse(cleaned); } catch {
+      const m = cleaned.match(/\[[\s\S]*\]/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]); } catch {}
+      }
+    }
+    let options = Array.isArray(parsed) ? parsed : null;
+    if (!options) options = FALLBACK();
+    // Normalize fields and filter invalid
+    const norm = options
+      .map(o => ({
+        type: String(o.type || '').toLowerCase() || 'flight',
+        carrier: String(o.carrier || o.name || '').trim() || 'Carrier',
+        departTime: String(o.departure || o.departTime || '').trim() || String(o.depart || '').trim() || '',
+        arriveTime: String(o.arrival || o.arriveTime || '').trim() || String(o.arrive || '').trim() || '',
+        duration: String(o.duration || '').trim(),
+        priceINR: Number(o.priceINR || o.price || 0),
+        url: o.url || undefined,
+        label: o.label || undefined,
+      }))
+      .filter(o => o.carrier && (o.departTime || o.duration));
+    return assignLabels(norm);
+  } catch (e) {
+    console.warn('[Transport] AI options failed:', e?.message || e);
+    return assignLabels(FALLBACK());
+  }
+}
+/**
  * Generate an AI-crafted travel journal (Memory Weaver) from a completed journey.
  * Input: { journey: { title, markdown, tripState, durationDays, locations, date }, user?: { displayName } }
  * Returns: markdown string. Falls back to a deterministic, readable journal if AI is unavailable.

@@ -164,6 +164,13 @@ export default function BeginJourney() {
           >
             📖 Memory Weaver
           </button>
+          <button
+            onClick={() => navigate('/bookings')}
+            className="ml-3 inline-flex items-center gap-2 rounded-xl border border-cyan-300/60 bg-cyan-400/10 px-6 py-3 text-cyan-100 backdrop-blur hover:bg-cyan-400/20 hover:shadow-[0_0_25px_rgba(34,211,238,0.25)]"
+            title="View all flights and trains your itinerary needs — best, cheapest, and fastest options."
+          >
+            ✈️ Bookings Required
+          </button>
           </motion.div>
           <button
             onClick={() => navigate('/dreams')}

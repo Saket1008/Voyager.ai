@@ -311,6 +311,14 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
                 LIVE ADVENTURE (PREVIEW)
               </button>
               <button
+                onClick={() => navigate('/bookings')}
+                className={`group relative bg-transparent border-2 border-cyan-300 text-cyan-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+                title="View all flights and trains your itinerary needs — best, cheapest, and fastest options."
+              >
+                BOOKINGS REQUIRED
+              </button>
+              <button
                 onClick={() => navigate('/memory')}
                 className={`group relative bg-transparent border-2 border-amber-300 text-amber-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
                 style={{ backdropFilter: 'blur(10px)' }}

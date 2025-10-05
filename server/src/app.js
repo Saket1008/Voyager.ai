@@ -19,6 +19,8 @@ import liveTipsRouter from './routes/liveTips.js';
 import diagnosticsRouter from './routes/diagnostics.js';
 import dreamsRouter from './routes/dreams.js';
 import memoryRouter from './routes/memory.js';
+import bookingsRouter from './routes/bookings.js';
+import adminRouter from './routes/admin.js';
 
 export function buildApp() {
   const app = express();
@@ -61,6 +63,8 @@ export function buildApp() {
   app.use('/api/live/tips', authMiddleware, liveTipsRouter);
   app.use('/api/dreams', authMiddleware, dreamsRouter);
   app.use('/api/memory', authMiddleware, memoryRouter);
+  app.use('/api/bookings', authMiddleware, bookingsRouter);
+  app.use('/api/admin', adminRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;

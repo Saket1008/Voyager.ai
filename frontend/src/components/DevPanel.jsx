@@ -1,5 +1,8 @@
 import React from 'react';
 import { useDevSettings } from '../context/DevSettingsContext.jsx';
+import { useAuth } from '../context/AuthContext';
+import { getApiBase } from '../lib/apiBase';
+import { toast } from '../lib/toast';
 
 const Toggle = ({ label, value, onChange, disabled = false }) => (
   <label className={`flex items-center justify-between gap-3 text-xs ${disabled ? 'opacity-60' : ''}`}>
@@ -16,6 +19,35 @@ const Toggle = ({ label, value, onChange, disabled = false }) => (
 export default function DevPanel() {
   const { settings, setSetting, reset } = useDevSettings();
   const [open, setOpen] = React.useState(false);
+  const { currentUser } = useAuth();
+
+  const handleResetAll = async () => {
+    try {
+      if (!window.confirm('This will delete your server data (itineraries, dreams, chats, feedback) for this account and clear local data. Continue?')) return;
+      const token = currentUser ? await currentUser.getIdToken() : null;
+      if (!token) { toast.error('Sign in required to reset server data'); return; }
+      const res = await fetch(`${getApiBase()}/api/admin/reset-user`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const out = await res.json().catch(()=>({}));
+      if (!res.ok || !out?.ok) {
+        toast.error(out?.error || 'Failed to reset on server');
+      } else {
+        // Clear localStorage keys except dev settings
+        try {
+          const keep = new Set(['voyager_dev_settings_v1']);
+          const toRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('voyager_') && !keep.has(k)) toRemove.push(k);
+          }
+          toRemove.forEach((k) => localStorage.removeItem(k));
+        } catch {}
+        toast.success('Reset complete. Reloading…');
+        setTimeout(() => window.location.reload(), 600);
+      }
+    } catch (e) {
+      toast.error(e?.message || 'Reset failed');
+    }
+  };
 
   return (
     <div className="fixed bottom-3 right-3 z-[10000] text-white">
@@ -60,6 +92,12 @@ export default function DevPanel() {
             <div className="flex items-center justify-between text-[11px]">
               <button onClick={reset} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/10">Reset</button>
               <span className="text-white/50">Local only</span>
+            </div>
+            <div className="pt-2 border-t border-white/10">
+              <button onClick={handleResetAll} className="w-full px-3 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs">
+                Reset my data (server + local)
+              </button>
+              <div className="text-[10px] text-white/60 mt-1">Deletes itineraries, dreams, chats, and feedback for this account. Keeps dev settings.</div>
             </div>
           </div>
         </div>
