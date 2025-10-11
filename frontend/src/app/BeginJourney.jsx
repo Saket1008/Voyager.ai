@@ -171,14 +171,28 @@ export default function BeginJourney() {
           >
             ✈️ Bookings Required
           </button>
-          </motion.div>
           <button
             onClick={() => navigate('/dreams')}
-            className="rounded-lg bg-white/10 text-white border border-white/20 px-4 py-2 hover:bg-white/20"
+            className="ml-3 inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-6 py-3 text-white backdrop-blur hover:bg-white/20"
             title="Plan and collaborate on dream destinations"
           >
             🌍 Dream Destinations
           </button>
+          <button
+            onClick={() => navigate('/community')}
+            className="mt-3 sm:mt-0 ml-0 sm:ml-3 inline-flex items-center gap-2 rounded-xl border border-fuchsia-300/60 bg-fuchsia-400/10 px-6 py-3 text-fuchsia-100 backdrop-blur hover:bg-fuchsia-400/20 hover:shadow-[0_0_25px_rgba(244,114,182,0.25)]"
+            title="Discover travelers and groups"
+          >
+            👥 Community
+          </button>
+          <button
+            onClick={() => navigate('/organizer')}
+            className="ml-3 inline-flex items-center gap-2 rounded-xl border border-emerald-300/60 bg-emerald-400/10 px-6 py-3 text-emerald-100 backdrop-blur hover:bg-emerald-400/20 hover:shadow-[0_0_25px_rgba(16,185,129,0.25)]"
+            title="Manage group trips and travelers"
+          >
+            🧭 Organizer Dashboard
+          </button>
+          </motion.div>
       </div>
 
       {/* Phases */}

@@ -21,6 +21,8 @@ import dreamsRouter from './routes/dreams.js';
 import memoryRouter from './routes/memory.js';
 import bookingsRouter from './routes/bookings.js';
 import adminRouter from './routes/admin.js';
+import communityRouter from './routes/community.js';
+import organizerRouter from './routes/organizer.js';
 
 export function buildApp() {
   const app = express();
@@ -65,6 +67,9 @@ export function buildApp() {
   app.use('/api/memory', authMiddleware, memoryRouter);
   app.use('/api/bookings', authMiddleware, bookingsRouter);
   app.use('/api/admin', adminRouter);
+  // Community endpoints expose both public and authed routes
+  app.use('/api', communityRouter);
+  app.use('/api', organizerRouter);
   app.use('/api/whoami', whoamiRouter);
 
   return app;

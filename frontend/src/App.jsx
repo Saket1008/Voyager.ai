@@ -17,6 +17,9 @@ import DreamDestinations from './pages/DreamDestinations.jsx';
 import ToastContainer from './components/ToastContainer.jsx';
 import MemoryWeaverPage from './pages/MemoryWeaverPage.jsx';
 import BookingsRequiredPage from './pages/BookingsRequiredPage.jsx';
+import CommunityPage from './pages/CommunityPage.jsx';
+import OrganizerDashboardPage from './pages/OrganizerDashboardPage.jsx';
+import OrganizerTripDetailsPage from './pages/OrganizerTripDetailsPage.jsx';
 
 function AppContent() {
   const { currentUser, loading } = useAuth();
@@ -84,6 +87,9 @@ function AppContent() {
             <Route path="/dreams" element={<DreamDestinations />} />
             <Route path="/memory" element={<MemoryWeaverPage />} />
             <Route path="/bookings" element={<BookingsRequiredPage />} />
+            <Route path="/community" element={<CommunityPage />} />
+            <Route path="/organizer" element={<OrganizerDashboardPage />} />
+            <Route path="/organizer/trip/:id" element={<OrganizerTripDetailsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}
