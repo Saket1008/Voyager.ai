@@ -1,3 +1,8 @@
 aayush
 flights and train integration
 images for created itenaries
+CREATE TABLE student (
+stud_id INT PRIMARY KEY, stud_name VARCHAR(50), dept VARCHAR(10),
+ 
+
+ 

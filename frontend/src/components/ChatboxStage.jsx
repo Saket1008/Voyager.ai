@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import Avatar from './Avatar.jsx';
 import { Clock, Utensils, Bed, Info, Lightbulb } from 'lucide-react';
+import { capitalizeLocationSegments, titleCaseLocationText } from '../lib/format';
 import { useDevSettings } from '../context/DevSettingsContext.jsx';
 import DaySelector from './DaySelector.jsx';
 import DatePicker from './DatePicker.jsx';
@@ -38,7 +39,7 @@ const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit
   const [locSug, setLocSug] = useState([]);
   const [locOpen, setLocOpen] = useState(false);
   const abortRef = useRef(null);
-  const capitalizeWords = (s) => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b);
+  const capitalizeWords = (s) => titleCaseLocationText(s);
   useEffect(() => {
     if (stage !== 'input_locations' || inputSpec?.type !== 'freeText') { setLocSug([]); setLocOpen(false); return; }
     const last = (locText.split(/[\n,]+/).pop() || '').trim();
@@ -1191,7 +1192,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
   }, [dynText, currentQuestionType]);
 
   // Helper: auto-capitalize first letter of each word for destinations
-  const capitalizeWords = (s) => s.replace(/\b([a-z])(\w*)/g, (_, a, b) => a.toUpperCase() + b);
+  const capitalizeWords = (s) => titleCaseLocationText(s);
   // Frontend is a dumb renderer; backend provides stage/inputSpec/quickOptions
   const [inputSpec, setInputSpec] = useState({ type: 'freeText' });
   const [quickOptions, setQuickOptions] = useState([]);
@@ -2087,7 +2088,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
     return () => clearTimeout(t);
   }, [input, stage, inputSpec?.type]);
 
-  const capFirstWord = (s) => s.replace(/^\s*([a-z])/, (m, a) => a.toUpperCase());
+  // capitalization handled via shared helpers in ../lib/format
 
   // Keyboard shortcut: Ctrl/Cmd+K to focus search
   useEffect(() => {
@@ -2524,10 +2525,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                             onChange={(e) => {
                               let val = e.target.value;
                               if (currentQuestionType === 'destination') {
-                                val = val
-                                  .split(/([\n,]+)/)
-                                  .map(seg => /[\n,]+/.test(seg) ? seg : capitalizeWords(seg))
-                                  .join('');
+                                val = capitalizeLocationSegments(val);
                               }
                               setDynText(val);
                             }}
@@ -2809,11 +2807,8 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         onChange={(e) => {
                           let val = e.target.value;
                           if (stage === 'input_locations' && inputSpec?.type === 'freeText') {
-                            // Auto-capitalize first word of each destination segment
-                            val = val
-                              .split(/([\n,]+)/)
-                              .map(seg => /[\n,]+/.test(seg) ? seg : capFirstWord(seg))
-                              .join('');
+                            // Auto-capitalize first letter of each word per segment
+                            val = capitalizeLocationSegments(val);
                           }
                           setInput(val);
                         }} 

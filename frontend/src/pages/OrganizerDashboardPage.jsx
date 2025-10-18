@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { getApiBase } from '../lib/apiBase';
 import { toast } from '../lib/toast';
 import { Calendar, Users, MapPin, Upload, Eye, PlusCircle, ClipboardList, PackageSearch } from 'lucide-react';
+import { titleCaseLocationText } from '../lib/format';
 
 const tabs = [
   { key: 'trips', label: 'Active Trips' },
@@ -224,7 +225,7 @@ export default function OrganizerDashboardPage() {
                 </div>
                 <div>
                   <label className="text-xs text-white/70">Destination</label>
-                  <input value={destination} onChange={(e)=>setDestination(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm outline-none" placeholder="e.g., Goa" />
+                  <input value={destination} onChange={(e)=>setDestination(titleCaseLocationText(e.target.value))} className="w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm outline-none" placeholder="e.g., Goa" />
                 </div>
                 <div className="pt-1">
                   <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 text-black font-semibold px-4 py-2 hover:bg-emerald-400">

@@ -93,3 +93,41 @@ router.post('/community/connect', authMiddleware, async (req, res) => {
 });
 
 export default router;
+
+// POST /api/circles/join → join a circle by code
+router.post('/circles/join', authMiddleware, async (req, res) => {
+  try {
+    const { uid } = req.user || {};
+    if (!uid) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    const code = String((req.body && req.body.code) || '').trim();
+    if (!code) return res.status(400).json({ ok: false, error: 'Missing join code' });
+
+    const admin = ensureFirebaseAdmin();
+    // In mock/local mode, accept any code and return a stub
+    if (!admin) {
+      return res.json({ ok: true, group: { id: `mock-${code}`, name: 'Sample Group', topic: 'Mock Topic', members: 1 } });
+    }
+
+    const db = admin.firestore();
+    // Look up circle by a 'code' field; alternatively allow ID direct match
+    let circleSnap = await db.collection('circles').where('code', '==', code).limit(1).get();
+    if (circleSnap.empty) {
+      // try direct id match as fallback
+      const direct = await db.collection('circles').doc(code).get();
+      if (!direct.exists) return res.status(404).json({ ok: false, error: 'Invalid or expired code' });
+      circleSnap = { empty: false, docs: [direct] };
+    }
+    const docRef = circleSnap.docs[0].ref;
+    const data = circleSnap.docs[0].data() || {};
+
+    // Add member; maintain members array or membersCount
+    const members = Array.isArray(data.members) ? new Set(data.members) : new Set();
+    members.add(uid);
+    const nextMembers = Array.from(members);
+    await docRef.set({ members: nextMembers, membersCount: nextMembers.length }, { merge: true });
+    return res.json({ ok: true, group: { id: docRef.id, name: data.name || 'Group', topic: data.topic || null, members: nextMembers.length } });
+  } catch (e) {
+    console.error('[circles:join] error', e);
+    return res.status(500).json({ ok: false, error: 'Failed to join group' });
+  }
+});

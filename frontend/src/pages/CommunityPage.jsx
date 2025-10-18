@@ -4,6 +4,7 @@ import { Users, Compass, Share2, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getApiBase } from '../lib/apiBase';
+import { titleCaseLocationText } from '../lib/format';
 import { toast } from '../lib/toast';
 
 function Chip({ children }) {
@@ -161,7 +162,7 @@ export default function CommunityPage() {
               <Search className="w-4 h-4 text-white/70" />
               <input
                 value={destQuery}
-                onChange={(e)=>setDestQuery(e.target.value)}
+                onChange={(e)=>setDestQuery(titleCaseLocationText(e.target.value))}
                 placeholder="Search destination…"
                 className="bg-transparent outline-none text-sm placeholder:text-white/50 w-44"
               />

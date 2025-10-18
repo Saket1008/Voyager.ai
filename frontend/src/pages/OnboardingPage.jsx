@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebaseClient';
 import { doc, setDoc } from 'firebase/firestore';
 import { DNA_QUESTIONS } from '../lib/dnaQuestions';
+import { titleCaseLocationText } from '../lib/format';
 
 export default function OnboardingPage({ onDone }) {
   const { currentUser } = useAuth();
@@ -594,7 +595,7 @@ export default function OnboardingPage({ onDone }) {
                                 </label>
                                 <label className="grid gap-1">
                                   <span className="text-xs text-white/70">Primary location (start point)</span>
-                                  <input value={userInfo.origin} onKeyDown={handleUserInfoEnter} onChange={(e) => setUserInfo((s) => ({ ...s, origin: e.target.value }))} className={`rounded-lg border bg-black/20 px-3 py-2 text-sm outline-none placeholder-white/40 focus:border-white/30 ${fieldErrors.origin ? 'border-rose-400/60' : 'border-white/15'}`} placeholder="City, Country" />
+                                  <input value={userInfo.origin} onKeyDown={handleUserInfoEnter} onChange={(e) => setUserInfo((s) => ({ ...s, origin: titleCaseLocationText(e.target.value) }))} className={`rounded-lg border bg-black/20 px-3 py-2 text-sm outline-none placeholder-white/40 focus:border-white/30 ${fieldErrors.origin ? 'border-rose-400/60' : 'border-white/15'}`} placeholder="City, Country" />
                                   {fieldErrors.origin && <span className="text-[11px] text-rose-300/90">{fieldErrors.origin}</span>}
                                 </label>
                               </div>

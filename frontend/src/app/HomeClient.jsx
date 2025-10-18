@@ -10,6 +10,27 @@ import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
 import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
 import '../styles/globals.css'
+import { MessageSquare, Compass, Globe, Rocket, ClipboardList, Calendar, Brain, Users, Zap } from 'lucide-react'
+
+function FeatureButtonCard({ icon: Icon, title, desc, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="group relative text-left rounded-2xl border border-cyan-300/30 bg-white/5 p-5 backdrop-blur-md transition-all duration-300 hover:border-cyan-300/60 hover:shadow-[0_0_25px_rgba(34,211,238,0.25)] pointer-events-auto"
+    >
+      <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-300/10 via-transparent to-blue-300/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <div className="relative z-10 flex items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-300/40 bg-cyan-300/10 text-cyan-200 shadow-inner shadow-cyan-500/10">
+          {Icon ? <Icon className="h-6 w-6" /> : <span>✨</span>}
+        </div>
+        <div>
+          <h4 className="text-lg font-semibold text-white/90">{title}</h4>
+          <p className="mt-1 text-sm text-white/70">{desc}</p>
+        </div>
+      </div>
+    </button>
+  )
+}
 
 function ItineraryOverlayList({ onOpen }) {
   const [items, setItems] = useState(() => {
@@ -110,16 +131,13 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
   const [itineraryData, setItineraryData] = useState(null)
   const [isItineraryOpen, setIsItineraryOpen] = useState(false)
   const [showItineraryList, setShowItineraryList] = useState(false)
+  const [showFeaturePicker, setShowFeaturePicker] = useState(false)
 
   const handleStartJourney = () => {
-    setIsAnimating(true)
-    if (enableWormhole) {
-      setShowWormhole(true)
-      setTimeout(() => { setShowWormhole(false); setCurrentView('final'); setIsAnimating(false); }, 4000)
-    } else {
-      setCurrentView('final');
-      setIsAnimating(false);
-    }
+    // Reveal feature picker instead of jumping straight into chat
+    setShowFeaturePicker(true)
+    setIsAnimating(false)
+    setShowWormhole(false)
   }
 
   const handleLoadingComplete = () => {
@@ -283,59 +301,36 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
         <div className="fixed inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
           <div className="text-center mb-12">
             <h1 ref={titleRef} className={`text-white font-light tracking-widest transition-all duration-150 ${isAnimating ? 'opacity-0' : showTitle ? 'opacity-100' : 'opacity-0'}`} style={{ fontSize: '5vw', fontWeight: 200, letterSpacing: '0.5rem', textShadow: '0 0 15px rgba(173, 216, 230, 0.7)' }}>VOYAGER.AI</h1>
-            <div className="mt-8 flex justify-center gap-4">
-              <button ref={buttonRef} onClick={handleStartJourney} className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} style={{ backdropFilter: 'blur(10px)' }}>
+            <div className="mt-8 flex justify-center">
+              <button
+                ref={buttonRef}
+                onClick={handleStartJourney}
+                className={`group relative bg-transparent border-2 border-blue-300 text-blue-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                style={{ backdropFilter: 'blur(10px)' }}
+              >
                 BEGIN YOUR JOURNEY
               </button>
-              <button
-                onClick={() => navigate('/begin')}
-                className={`group relative bg-transparent border-2 border-cyan-300 text-cyan-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-              >
-                EXPLORE FEATURES
-              </button>
-              <button
-                onClick={() => navigate('/dreams')}
-                className={`group relative bg-transparent border-2 border-emerald-300 text-emerald-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-                title="Plan and collaborate on dream destinations"
-              >
-                DREAM DESTINATIONS
-              </button>
-              <button
-                onClick={() => navigate('/live')}
-                className={`group relative bg-transparent border-2 border-purple-300 text-purple-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-                title="Live Adventure Mode (Preview)"
-              >
-                LIVE ADVENTURE (PREVIEW)
-              </button>
-              <button
-                onClick={() => navigate('/bookings')}
-                className={`group relative bg-transparent border-2 border-cyan-300 text-cyan-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-                title="View all flights and trains your itinerary needs — best, cheapest, and fastest options."
-              >
-                BOOKINGS REQUIRED
-              </button>
-              <button
-                onClick={() => navigate('/memory')}
-                className={`group relative bg-transparent border-2 border-amber-300 text-amber-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-                title="Generate an AI-crafted travel journal from your journeys"
-              >
-                MEMORY WEAVER
-              </button>
-              <button
-                onClick={() => setShowOneClick(v => !v)}
-                className={`group relative bg-transparent border-2 border-green-300 text-green-200 px-8 py-4 rounded-lg font-light tracking-wider transition-all duration-150 ${isAnimating ? 'opacity-0' : showButton ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-                style={{ backdropFilter: 'blur(10px)' }}
-                title="Instant itinerary with your saved DNA"
-              >
-                ONE‑CLICK ITINERARY
-              </button>
             </div>
-            {showOneClick && (
+
+            {showFeaturePicker && (
+              <div className="mt-8 pointer-events-auto px-4">
+                <div className="mx-auto max-w-6xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <FeatureButtonCard icon={MessageSquare} title="Start Chat Planning" desc="Plan via a guided conversation." onClick={() => { setCurrentView('final'); setShowFeaturePicker(false); }} />
+                    <FeatureButtonCard icon={Compass} title="Explore Features" desc="See what's possible across Voyager." onClick={() => navigate('/begin')} />
+                    <FeatureButtonCard icon={Globe} title="Dream Destinations" desc="Plan and collaborate on dream trips." onClick={() => navigate('/dreams')} />
+                    <FeatureButtonCard icon={Rocket} title="Live Adventure" desc="Adaptive schedule that reacts to your day." onClick={() => navigate('/live')} />
+                    <FeatureButtonCard icon={Calendar} title="Bookings Required" desc="Flights, trains, and buses to book." onClick={() => navigate('/bookings')} />
+                    <FeatureButtonCard icon={Brain} title="Memory Weaver" desc="AI-crafted travel journal from journeys." onClick={() => navigate('/memory')} />
+                    <FeatureButtonCard icon={Users} title="Community" desc="Discover travelers and popular groups." onClick={() => navigate('/community')} />
+                    <FeatureButtonCard icon={ClipboardList} title="Organizer Dashboard" desc="Manage group trips and travelers." onClick={() => navigate('/organizer')} />
+                    <FeatureButtonCard icon={Zap} title="One‑Click Itinerary" desc="Instant plan from your saved DNA." onClick={() => setShowOneClick(v => !v)} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showFeaturePicker && showOneClick && (
               <div className="mt-6 pointer-events-auto mx-auto w-full max-w-2xl px-4">
                 <OneClickItinerary />
               </div>
