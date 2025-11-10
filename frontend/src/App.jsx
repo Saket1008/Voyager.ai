@@ -28,9 +28,9 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const { settings } = useDevSettings();
   const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  // In localhost without Firebase configured, skip onboarding so Home loads directly
+  // In all environments, require authentication. Onboarding still respects dev toggle.
   const showOnboarding = settings.devMode ? settings.showOnboarding : true;
-  const canUseAppWithoutAuth = isLocalhost; // allow guest mode on localhost for fast iteration
+  const canUseAppWithoutAuth = false; // disable guest mode entirely
 
   React.useEffect(() => {
     let mounted = true;
@@ -56,7 +56,7 @@ function AppContent() {
       };
       checkProfile();
     } else {
-      // When signed out locally, allow access to Home without forcing onboarding
+      // Signed out: no onboarding checks; AuthPage will be shown
       setCheckingOnboarding(false);
     }
     return () => { mounted = false; };
@@ -74,7 +74,7 @@ function AppContent() {
   <HomeButton position="top-right" />
       <div className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(60%_50%_at_50%_0%,rgba(25,195,125,0.15),transparent_60%),radial-gradient(40%_40%_at_80%_20%,rgba(96,165,250,0.12),transparent_60%),radial-gradient(30%_30%_at_20%_10%,rgba(255,255,255,0.08),transparent_60%)]" />
       <main className="relative z-10 pt-0">
-        {(!currentUser && !canUseAppWithoutAuth) ? (
+        {(!currentUser) ? (
           <AuthPage />
         ) : currentUser && (needsOnboarding && showOnboarding) ? (
           <div className="min-h-screen"><OnboardingPage onDone={() => setNeedsOnboarding(false)} /></div>

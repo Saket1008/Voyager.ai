@@ -18,7 +18,8 @@ import DatePicker from './DatePicker.jsx';
 import ConfirmSummary from './ConfirmSummary.jsx';
 
 // Enhanced StageInput component with advanced date selection and pace options
-const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints }) => {
+// Note: isTyping is passed from parent to prevent clicks while a request is in-flight
+const StageInput = ({ inputSpec, quickOptions, flowState, setFlowState, onSubmit, stage, hints, isTyping = false }) => {
   const [multiSel, setMultiSel] = useState([]);
   const [uiDays, setUiDays] = useState(flowState?.durationDays || 7);
   const [uiDaysFlex, setUiDaysFlex] = useState(flowState?.durationFlex || false);
@@ -2732,6 +2733,7 @@ export default function ChatboxStage({ isSidebarOpen = false, setIsSidebarOpen =
                         setFlowState={(s) => setFlowState(s)}
                         stage={stage}
                         hints={latestHints}
+                        isTyping={isTyping}
                         onSubmit={async (value) => {
                           // Accept either a raw string or an object { value, stageOverride }
                           let messageText = value;

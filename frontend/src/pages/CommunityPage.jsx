@@ -55,6 +55,23 @@ export default function CommunityPage() {
   const [dateQuery, setDateQuery] = useState('');
   const [joinCode, setJoinCode] = useState('');
 
+  // Try to match YYYY-MM-DD date strings present in various possible fields
+  const matchesDate = (obj, q) => {
+    const d = String(q || '').trim();
+    if (!d) return true;
+    // Collect potential date-like fields commonly used
+    const candidates = [
+      obj?.date,
+      obj?.when,
+      obj?.startDate,
+      obj?.endDate,
+      obj?.nextTripDate,
+      ...(Array.isArray(obj?.dates) ? obj.dates : []),
+      ...(Array.isArray(obj?.availableDates) ? obj.availableDates : []),
+    ].filter(Boolean);
+    return candidates.some((val) => String(val).startsWith(d));
+  };
+
   useEffect(() => {
     let mounted = true;
     const fetchUsers = async () => {
@@ -101,19 +118,26 @@ export default function CommunityPage() {
   }, [currentUser]);
 
   const filteredUsers = useMemo(() => {
-    if (!destQuery) return users;
-    const q = destQuery.toLowerCase();
-    return users.filter(u =>
-      (u.origin && String(u.origin).toLowerCase().includes(q)) ||
-      (Array.isArray(u.interests) && u.interests.some(t => String(t).toLowerCase().includes(q)))
-    );
-  }, [users, destQuery]);
+    const q = String(destQuery || '').toLowerCase();
+    return users.filter((u) => {
+      const matchesDest = !q ||
+        (u.origin && String(u.origin).toLowerCase().includes(q)) ||
+        (Array.isArray(u.interests) && u.interests.some((t) => String(t).toLowerCase().includes(q)));
+      const matchesWhen = matchesDate(u, dateQuery);
+      return matchesDest && matchesWhen;
+    });
+  }, [users, destQuery, dateQuery]);
 
   const filteredGroups = useMemo(() => {
-    if (!destQuery) return groups;
-    const q = destQuery.toLowerCase();
-    return groups.filter(g => (g.topic && String(g.topic).toLowerCase().includes(q)) || (g.name && String(g.name).toLowerCase().includes(q)));
-  }, [groups, destQuery]);
+    const q = String(destQuery || '').toLowerCase();
+    return groups.filter((g) => {
+      const matchesDest = !q ||
+        (g.topic && String(g.topic).toLowerCase().includes(q)) ||
+        (g.name && String(g.name).toLowerCase().includes(q));
+      const matchesWhen = matchesDate(g, dateQuery);
+      return matchesDest && matchesWhen;
+    });
+  }, [groups, destQuery, dateQuery]);
 
   const handleConnect = (user) => {
     toast.success(`Request sent to ${user?.name || 'traveler'} (coming soon)`);
