@@ -8,10 +8,10 @@ import SpaceBackground from '../components/SpaceBackground.jsx'
 import { useDevSettings } from '../context/DevSettingsContext.jsx'
 import SimpleLoader from '../components/Loader.jsx'
 import ChatboxStage from '../components/ChatboxStage.jsx'
-import ItineraryCanvas from '../components/ItineraryCanvas.jsx'
+import ItineraryCardsView from '../components/ItineraryCardsView.jsx'
 import '../styles/globals.css'
 import { MessageSquare, Compass, Globe, Rocket, ClipboardList, Calendar, Brain, Users, Zap } from 'lucide-react'
-
+//AAYUSH108
 function FeatureButtonCard({ icon: Icon, title, desc, onClick }) {
   return (
     <button
@@ -355,22 +355,13 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
                 onItineraryGenerated={handleItineraryGenerated}
               />
             </motion.div>
-            {/* Canvas area expands from the right */}
+            {/* Legacy canvas area (unused with cards view, kept for layout animation) */}
             <motion.div
               animate={{ width: isItineraryOpen ? '50%' : '0%' }}
               transition={{ type: 'spring', stiffness: 260, damping: 30 }}
               className="h-full overflow-hidden"
             >
-        {itineraryData && isItineraryOpen && (
-                <ItineraryCanvas 
-          // Always pass a markdown string; plannedDays if provided by generator
-          itineraryMarkdown={typeof itineraryData === 'string' ? itineraryData : (itineraryData?.markdown || '')}
-                  onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
-                  isSidebarOpen={isSidebarOpen}
-                  onToggleSidebar={() => { try { setIsSidebarOpen(v => !v) } catch {} }}
-          plannedDays={typeof itineraryData === 'object' ? (itineraryData?.plannedDays ?? null) : null}
-                />
-              )}
+              {/* Intentionally empty: full-screen cards view renders outside this panel */}
             </motion.div>
           </div>
 
@@ -396,6 +387,15 @@ export default function HomeClient({ isSidebarOpen = false, setIsSidebarOpen = (
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Full-screen Itinerary Cards overlay */}
+      {itineraryData && isItineraryOpen && (
+        <ItineraryCardsView
+          itineraryMarkdown={typeof itineraryData === 'string' ? itineraryData : (itineraryData?.markdown || '')}
+          plannedDays={typeof itineraryData === 'object' ? (itineraryData?.plannedDays ?? null) : null}
+          onClose={() => { setIsItineraryOpen(false); try { setIsSidebarOpen(true) } catch {} }}
+        />
       )}
 
       {/* My Itineraries Overlay */}
